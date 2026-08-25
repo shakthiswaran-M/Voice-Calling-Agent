@@ -1,4 +1,5 @@
-import { KeyboardEvent, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
 
 interface InputBoxProps {
   onSend: (text: string) => void;
