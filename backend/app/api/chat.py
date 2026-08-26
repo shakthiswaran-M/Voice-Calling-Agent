@@ -1,11 +1,13 @@
 from uuid import uuid4
 import re
 import logging
+import json
 from fastapi import APIRouter, HTTPException
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 from app.agent.business_info import BUSINESS_INFO
 from app.agent.prompts import AGENT_INSTRUCTIONS, SYSTEM_PROMPT
+from app.agent.tools import AVAILABLE_TOOLS, TOOL_SCHEMAS
 from app.config import settings
 
 router = APIRouter()
@@ -196,40 +198,69 @@ async def chat(req: ChatRequest):
             "content": req.message,
         }
     )
+    current_turn = [messages[-1]]
 
   
     # Call LLM
    
     try:
-        completion = await client.chat.completions.create(
-            model=settings.llm_model,
-            messages=messages,
-        )
+        for _ in range(3):
+            completion = await client.chat.completions.create(
+                model=settings.llm_model,
+                messages=messages,
+                tools=TOOL_SCHEMAS,
+                tool_choice="auto",
+            )
+            assistant_message = completion.choices[0].message
+            tool_calls = assistant_message.tool_calls or []
+
+            assistant_data = assistant_message.model_dump(exclude_none=True)
+            messages.append(assistant_data)
+            current_turn.append(assistant_data)
+
+            if not tool_calls:
+                reply = assistant_message.content or ""
+                break
+
+            for tool_call in tool_calls:
+                tool_name = tool_call.function.name
+                tool = AVAILABLE_TOOLS.get(tool_name)
+                if tool is None:
+                    raise ValueError(f"Unknown tool requested: {tool_name}")
+
+                try:
+                    arguments = json.loads(tool_call.function.arguments or "{}")
+                    result = tool(**arguments)
+                except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                    result = {"error": f"Tool could not be executed: {exc}"}
+
+                tool_message = {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "name": tool_name,
+                    "content": json.dumps(result),
+                }
+                messages.append(tool_message)
+                current_turn.append(tool_message)
+        else:
+            completion = await client.chat.completions.create(
+                model=settings.llm_model,
+                messages=messages,
+                tools=TOOL_SCHEMAS,
+                tool_choice="none",
+            )
+            assistant_message = completion.choices[0].message
+            reply = assistant_message.content or ""
+            current_turn.append(assistant_message.model_dump(exclude_none=True))
     except Exception as exc:
-        logger.exception("LLM request failed for session %s", session_id)
+        logger.exception("LLM or tool request failed for session %s", session_id)
         raise HTTPException(
             status_code=502,
             detail="The language model service is unavailable. Check LLM_API_KEY and try again.",
         ) from exc
 
-    reply = completion.choices[0].message.content or ""
-
-    # SAVE USER MESSAGE
-
-    conversation_history[session_id].append(
-        {
-            "role": "user",
-            "content": req.message,
-        }
-    )
-
-    # SAVE AI RESPONSE  
-    conversation_history[session_id].append(
-        {
-            "role": "assistant",
-            "content": reply,
-        }
-    )
+    # Save the complete current turn, including tool calls and results.
+    conversation_history[session_id].extend(current_turn)
     # Return response
     return ChatResponse(
         reply=reply,
