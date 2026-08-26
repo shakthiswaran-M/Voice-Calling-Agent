@@ -8,7 +8,7 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isSending, setIsSending] = useState(false);
 
-  const handleSend = async (text: string) => {
+  const  handleSend = async (text: string) => {
     const userMessage: Message = {
       id: crypto.randomUUID(),
       sender: "user",
