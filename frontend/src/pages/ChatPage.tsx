@@ -7,8 +7,9 @@ import type { Message } from "../types";
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isSending, setIsSending] = useState(false);
+  const [sessionId, setSessionId] = useState<string>();
 
-  const  handleSend = async (text: string) => {
+  const handleSend = async (text: string) => {
     const userMessage: Message = {
       id: crypto.randomUUID(),
       sender: "user",
@@ -18,13 +19,23 @@ export default function ChatPage() {
     setIsSending(true);
 
     try {
-      const reply = await sendMessage(text);
+      const reply = await sendMessage(text, sessionId);
+      setSessionId(reply.sessionId);
       const agentMessage: Message = {
         id: crypto.randomUUID(),
         sender: "agent",
         text: reply.text,
       };
       setMessages((prev) => [...prev, agentMessage]);
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          sender: "agent",
+          text: "I'm having trouble accessing that right now. Please try again.",
+        },
+      ]);
     } finally {
       setIsSending(false);
     }
