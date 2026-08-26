@@ -3,6 +3,8 @@ import re
 from fastapi import APIRouter
 from openai import AsyncOpenAI
 from pydantic import BaseModel
+from app.agent.business_info import BUSINESS_INFO
+from app.agent.prompts import AGENT_INSTRUCTIONS, SYSTEM_PROMPT
 from app.config import settings
 
 router = APIRouter()
@@ -34,16 +36,21 @@ def update_context(session_id: str, message: str):
 
     if session_id not in conversation_context:
         conversation_context[session_id] = {
-            "name": None,
-            "language": None,
-            "topic": None,
-            "important_facts": [],
+            "customer": {
+                "name": None
+            },
+            "business": {
+                "appointment": None,
+                "order": None
+            },
+            "conversation": {
+                "language": None,
+                "topic": None,
+                "important_facts": []
+            }
         }
 
     context = conversation_context[session_id]
-
-    # Detect user's name
-  
 
     name_patterns = [
         r"\bmy name is ([A-Za-z]+)",
@@ -56,16 +63,13 @@ def update_context(session_id: str, message: str):
         match = re.search(pattern, message, re.IGNORECASE)
 
         if match:
-            context["name"] = match.group(1).strip().title()
+            context["customer"]["name"] = match.group(1).strip().title()
             break
 
-    # --------------------------------------------------------
-    # Store important user statement
-    # --------------------------------------------------------
-
     if len(message.strip()) > 3:
-        if message not in context["important_facts"]:
-            context["important_facts"].append(message)
+        important_facts = context["conversation"]["important_facts"]
+        if message not in important_facts:
+            important_facts.append(message)
 
     return context
 
@@ -87,27 +91,31 @@ def build_context_message(session_id: str) -> str:
 
     context_parts = []
 
-    if context.get("name"):
+    customer = context["customer"]
+    conversation = context["conversation"]
+
+    if customer.get("name"):
         context_parts.append(
-            f"Customer name: {context['name']}"
+            f"Customer name: {customer['name']}"
         )
 
-    if context.get("language"):
+    if conversation.get("language"):
         context_parts.append(
-            f"Preferred language: {context['language']}"
+            f"Preferred language: {conversation['language']}"
         )
 
-    if context.get("topic"):
+    if conversation.get("topic"):
         context_parts.append(
-            f"Current topic: {context['topic']}"
+            f"Current topic: {conversation['topic']}"
         )
 
-    if context.get("important_facts"):
+    important_facts = conversation["important_facts"]
+    if important_facts:
         context_parts.append(
             "Relevant information from the conversation:\n"
             + "\n".join(
                 f"- {fact}"
-                for fact in context["important_facts"][-5:]
+                for fact in important_facts[-5:]
             )
         )
 
@@ -161,7 +169,7 @@ async def chat(req: ChatRequest):
     messages = [
         {
             "role": "system",
-            "content": "You are a helpful customer support agent.",
+            "content": f"{SYSTEM_PROMPT}\n\n{AGENT_INSTRUCTIONS}\n\nBusiness information:\n{BUSINESS_INFO}",
         }
     ]
 
