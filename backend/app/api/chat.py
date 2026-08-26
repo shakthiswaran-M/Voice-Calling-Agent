@@ -1,6 +1,7 @@
 from uuid import uuid4
 import re
-from fastapi import APIRouter
+import logging
+from fastapi import APIRouter, HTTPException
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 from app.agent.business_info import BUSINESS_INFO
@@ -8,6 +9,7 @@ from app.agent.prompts import AGENT_INSTRUCTIONS, SYSTEM_PROMPT
 from app.config import settings
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 client = AsyncOpenAI(
     api_key=settings.llm_api_key,
@@ -198,10 +200,17 @@ async def chat(req: ChatRequest):
   
     # Call LLM
    
-    completion = await client.chat.completions.create(
-        model=settings.llm_model,
-        messages=messages,
-    )
+    try:
+        completion = await client.chat.completions.create(
+            model=settings.llm_model,
+            messages=messages,
+        )
+    except Exception as exc:
+        logger.exception("LLM request failed for session %s", session_id)
+        raise HTTPException(
+            status_code=502,
+            detail="The language model service is unavailable. Check LLM_API_KEY and try again.",
+        ) from exc
 
     reply = completion.choices[0].message.content or ""
 

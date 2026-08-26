@@ -3,7 +3,7 @@ export interface ChatReply {
   sessionId: string;
 }
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:5000";
 
 export async function sendMessage(
   message: string,
@@ -16,9 +16,22 @@ export async function sendMessage(
   });
 
   if (!res.ok) {
-    throw new Error(`Chat request failed: ${res.status}`);
+    let detail = `Chat request failed (${res.status})`;
+    try {
+      const error = (await res.json()) as { detail?: string };
+      if (error.detail) {
+        detail = error.detail;
+      }
+    } catch {
+      // Keep the status-based message when the server did not return JSON.
+    }
+    throw new Error(detail);
   }
 
   const data = await res.json();
+  if (typeof data.reply !== "string" || typeof data.session_id !== "string") {
+    throw new Error("The chat service returned an invalid response.");
+  }
+
   return { text: data.reply, sessionId: data.session_id };
 }

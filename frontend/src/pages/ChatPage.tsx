@@ -27,13 +27,20 @@ export default function ChatPage() {
         text: reply.text,
       };
       setMessages((prev) => [...prev, agentMessage]);
-    } catch {
+    } catch (error) {
+      const errorMessage =
+        error instanceof TypeError
+          ? "The chat server is unavailable. Start the backend and try again."
+          : error instanceof Error
+            ? error.message
+            : "The chat request failed. Please try again.";
+
       setMessages((prev) => [
         ...prev,
         {
           id: crypto.randomUUID(),
           sender: "agent",
-          text: "I'm having trouble accessing that right now. Please try again.",
+          text: errorMessage,
         },
       ]);
     } finally {
