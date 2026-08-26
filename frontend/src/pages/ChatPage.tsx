@@ -2,13 +2,13 @@ import { useState } from "react";
 import ChatWindow from "../components/ChatWindow";
 import InputBox from "../components/InputBox";
 import { sendMessage } from "../services/chatService";
-import { Message } from "../types";
+import type { Message } from "../types";
 
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isSending, setIsSending] = useState(false);
 
-  const handleSend = async (text: string) => {
+  const  handleSend = async (text: string) => {
     const userMessage: Message = {
       id: crypto.randomUUID(),
       sender: "user",
