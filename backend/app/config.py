@@ -7,6 +7,7 @@ ENV_PATH = BASE_DIR / ".env"                        # points to backend/.env
 class Settings(BaseSettings):
     llm_api_key: str
     llm_model: str = "sarvam-105b-conversations"
+    database_url: str
 
     class Config:
         env_file = str(ENV_PATH)

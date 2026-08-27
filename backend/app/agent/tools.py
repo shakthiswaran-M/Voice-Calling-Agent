@@ -1,5 +1,9 @@
 
-# MOCK DATA
+from uuid import uuid4
+
+from app.database import database
+
+# Reference data is seeded into PostgreSQL during application startup.
 
 MOCK_CUSTOMERS = {
     "12345": {
@@ -109,36 +113,44 @@ MOCK_FAQS = {
 # EXISTING TEAM TOOLS
 
 
-def get_customer(customer_id: str) -> dict:
+async def get_customer(customer_id: str) -> dict:
     """Look up a customer's basic details by their customer ID."""
 
-    customer = MOCK_CUSTOMERS.get(customer_id)
+    customer = await database.fetchrow(
+        "SELECT customer_id, name, phone FROM customers WHERE customer_id = $1",
+        customer_id,
+    )
 
     if not customer:
         return {
             "error": f"No customer found with ID {customer_id}"
         }
 
-    return customer
+    return dict(customer)
 
 
-def get_appointment(customer_id: str) -> dict:
+async def get_appointment(customer_id: str) -> dict:
     """Look up a customer's upcoming appointment by their customer ID."""
 
-    appointment = MOCK_APPOINTMENTS.get(customer_id)
+    appointment = await database.fetchrow(
+        """SELECT id, customer_id, date, time, status FROM appointments
+        WHERE customer_id = $1 AND status = 'scheduled'
+        ORDER BY date, time LIMIT 1""",
+        customer_id,
+    )
 
     if not appointment:
         return {
             "error": f"No appointment found for customer {customer_id}"
         }
 
-    return appointment
+    return dict(appointment)
 
 
 # 1. CAPTURE LEAD
 
 
-def capture_lead(
+async def capture_lead(
     name: str,
     email: str,
     company: str,
@@ -163,7 +175,7 @@ def capture_lead(
     if not requirement.strip():
         return {"error": "Requirement is required."}
 
-    lead_id = str(len(MOCK_LEADS) + 1)
+    lead_id = str(await database.fetchval("SELECT COALESCE(MAX(lead_id::int), 0) + 1 FROM leads"))
 
     lead = {
         "lead_id": lead_id,
@@ -174,7 +186,11 @@ def capture_lead(
         "status": "new",
     }
 
-    MOCK_LEADS[lead_id] = lead
+    await database.execute(
+        """INSERT INTO leads (lead_id, name, email, company, requirement, status)
+        VALUES ($1, $2, $3, $4, $5, $6)""",
+        lead_id, lead["name"], lead["email"], lead["company"], lead["requirement"], lead["status"],
+    )
 
     return {
         "success": True,
@@ -187,17 +203,19 @@ def capture_lead(
 # 2. GET SERVICE INFO
 
 
-def get_service_info(service_name: str) -> dict:
+async def get_service_info(service_name: str) -> dict:
     """
     Look up structured information about a NetKathir service.
     """
 
     service_name_clean = service_name.strip().lower()
 
-    for key, service in MOCK_SERVICES.items():
-
-        if key.lower() == service_name_clean:
-            return service
+    service = await database.fetchrow(
+        "SELECT name, description FROM services WHERE LOWER(key) = $1",
+        service_name_clean,
+    )
+    if service:
+        return dict(service)
 
     return {
         "error": f"No service found with name '{service_name}'"
@@ -208,7 +226,7 @@ def get_service_info(service_name: str) -> dict:
 # 3. SCHEDULE CONSULTATION
 
 
-def schedule_consultation(
+async def schedule_consultation(
     name: str,
     contact: str,
     preferred_time: str,
@@ -232,7 +250,7 @@ def schedule_consultation(
     if not topic.strip():
         return {"error": "Consultation topic is required."}
 
-    consultation_id = str(len(MOCK_CONSULTATIONS) + 1)
+    consultation_id = str(uuid4())
 
     consultation = {
         "consultation_id": consultation_id,
@@ -243,7 +261,13 @@ def schedule_consultation(
         "status": "requested",
     }
 
-    MOCK_CONSULTATIONS[consultation_id] = consultation
+    await database.execute(
+        """INSERT INTO consultations
+        (consultation_id, name, contact, preferred_time, topic, status)
+        VALUES ($1, $2, $3, $4, $5, $6)""",
+        consultation_id, consultation["name"], consultation["contact"],
+        consultation["preferred_time"], consultation["topic"], consultation["status"],
+    )
 
     return {
         "success": True,
@@ -256,7 +280,7 @@ def schedule_consultation(
 # 4. CHECK CONSULTATION AVAILABILITY
 
 
-def check_consultation_availability(
+async def check_consultation_availability(
     date_range: str,
 ) -> dict:
     """
@@ -268,11 +292,14 @@ def check_consultation_availability(
             "error": "Date range is required."
         }
 
-    available_slots = [
-        slot
-        for slot in MOCK_CONSULTATION_SLOTS
-        if slot["available"]
-    ]
+    available_slots = [dict(slot) for slot in await database.fetch(
+        "SELECT id, date, time, available FROM consultation_slots WHERE available = TRUE AND date ILIKE $1 ORDER BY date, time",
+        f"%{date_range.strip()}%",
+    )]
+    if not available_slots:
+        available_slots = [dict(slot) for slot in await database.fetch(
+            "SELECT id, date, time, available FROM consultation_slots WHERE available = TRUE ORDER BY date, time"
+        )]
 
     if not available_slots:
         return {
@@ -309,7 +336,7 @@ def transfer_to_human() -> dict:
 # 6. GET CASE STUDY
 
 
-def get_case_study(
+async def get_case_study(
     industry_or_service: str,
 ) -> dict:
     """
@@ -319,10 +346,12 @@ def get_case_study(
 
     query = industry_or_service.strip().lower()
 
-    for key, case_study in MOCK_CASE_STUDIES.items():
-
-        if query in key.lower():
-            return case_study
+    case_study = await database.fetchrow(
+        "SELECT name, description FROM case_studies WHERE LOWER(key) LIKE $1 LIMIT 1",
+        f"%{query}%",
+    )
+    if case_study:
+        return dict(case_study)
 
     return {
         "error": (
@@ -336,17 +365,19 @@ def get_case_study(
 # 7. FAQ LOOKUP
 
 
-def faq_lookup(topic: str) -> dict:
+async def faq_lookup(topic: str) -> dict:
     """
     Look up an answer to a frequently asked NetKathir question.
     """
 
     query = topic.strip().lower()
 
-    for key, faq in MOCK_FAQS.items():
-
-        if key in query or query in key:
-            return faq
+    faq = await database.fetchrow(
+        "SELECT topic, answer FROM faqs WHERE LOWER(key) LIKE $1 OR $1 LIKE LOWER(key) LIMIT 1",
+        f"%{query}%",
+    )
+    if faq:
+        return dict(faq)
 
     return {
         "error": f"No FAQ found for topic '{topic}'"

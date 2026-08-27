@@ -2,6 +2,7 @@ from uuid import uuid4
 import re
 import logging
 import json
+import inspect
 from fastapi import APIRouter, HTTPException
 from openai import AsyncOpenAI
 from pydantic import BaseModel
@@ -9,6 +10,7 @@ from app.agent.business_info import BUSINESS_INFO
 from app.agent.prompts import AGENT_INSTRUCTIONS, SYSTEM_PROMPT
 from app.agent.tools import AVAILABLE_TOOLS, TOOL_SCHEMAS
 from app.config import settings
+from app.database import database
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -27,34 +29,19 @@ class ChatResponse(BaseModel):
     reply: str
     session_id: str
 
-# CONVERSATION STORAGE
-conversation_history: dict[str, list[dict[str, str]]] = {}
-# CONTEXT STORAGE
-conversation_context: dict[str, dict] = {}
 # CONTEXT MANAGEMENT
-def update_context(session_id: str, message: str):
+def update_context(context: dict, message: str) -> dict:
     """
     Extract important information from the user's message
     and store it for the current conversation session.
     """
 
-    if session_id not in conversation_context:
-        conversation_context[session_id] = {
-            "customer": {
-                "name": None
-            },
-            "business": {
-                "appointment": None,
-                "order": None
-            },
-            "conversation": {
-                "language": None,
-                "topic": None,
-                "important_facts": []
-            }
-        }
-
-    context = conversation_context[session_id]
+    context.setdefault("customer", {"name": None})
+    context.setdefault("business", {"appointment": None, "order": None})
+    context.setdefault(
+        "conversation",
+        {"language": None, "topic": None, "important_facts": []},
+    )
 
     name_patterns = [
         r"\bmy name is ([A-Za-z]+)",
@@ -82,16 +69,11 @@ def update_context(session_id: str, message: str):
 # CONTEXT FORMATTER
 # ============================================================
 
-def build_context_message(session_id: str) -> str:
+def build_context_message(context: dict) -> str:
     """
     Converts stored context into information that can be
     supplied to the LLM.
     """
-
-    context = conversation_context.get(session_id)
-
-    if not context:
-        return ""
 
     context_parts = []
 
@@ -145,26 +127,16 @@ async def chat(req: ChatRequest):
 
     session_id = req.session_id or str(uuid4())
 
-    # --------------------------------------------------------
-    # Create history for this session
-    # --------------------------------------------------------
-
-    if session_id not in conversation_history:
-        conversation_history[session_id] = []
-
-  
     # Update context BEFORE calling the LLM
-  
-
-    update_context(
-        session_id=session_id,
-        message=req.message,
-    )
+    await database.ensure_conversation(session_id)
+    context = await database.get_context(session_id)
+    update_context(context, req.message)
+    await database.save_context(session_id, context)
 
     # Get current context
   
 
-    context_message = build_context_message(session_id)
+    context_message = build_context_message(context)
 
    
     # Build messages for the LLM
@@ -187,9 +159,7 @@ async def chat(req: ChatRequest):
         )
 
     # Add previous conversation history
-    messages.extend(
-        conversation_history[session_id]
-    )
+    messages.extend(await database.get_messages(session_id))
 
     # Add current user message
     messages.append(
@@ -231,6 +201,8 @@ async def chat(req: ChatRequest):
                 try:
                     arguments = json.loads(tool_call.function.arguments or "{}")
                     result = tool(**arguments)
+                    if inspect.isawaitable(result):
+                        result = await result
                 except (TypeError, ValueError, json.JSONDecodeError) as exc:
                     result = {"error": f"Tool could not be executed: {exc}"}
 
@@ -260,7 +232,7 @@ async def chat(req: ChatRequest):
         ) from exc
 
     # Save the complete current turn, including tool calls and results.
-    conversation_history[session_id].extend(current_turn)
+    await database.add_messages(session_id, current_turn)
     # Return response
     return ChatResponse(
         reply=reply,
