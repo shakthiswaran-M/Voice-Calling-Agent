@@ -10,11 +10,10 @@ from app.agent.business_info import BUSINESS_INFO
 from app.agent.prompts import AGENT_INSTRUCTIONS, SYSTEM_PROMPT
 from app.agent.tools import AVAILABLE_TOOLS, TOOL_SCHEMAS
 from app.config import settings
-from app.database import database
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
+ 
 client = AsyncOpenAI(
     api_key=settings.llm_api_key,
     base_url="https://api.sarvam.ai/v1",
@@ -24,11 +23,15 @@ client = AsyncOpenAI(
 class ChatRequest(BaseModel):
     message: str
     session_id: str | None = None
-
+ 
 class ChatResponse(BaseModel):
     reply: str
     session_id: str
 
+# CONVERSATION STORAGE
+conversation_history: dict[str, list[dict[str, str]]] = {}
+# CONTEXT STORAGE
+conversation_context: dict[str, dict] = {}
 # CONTEXT MANAGEMENT
 def update_context(context: dict, message: str) -> dict:
     """
@@ -36,12 +39,23 @@ def update_context(context: dict, message: str) -> dict:
     and store it for the current conversation session.
     """
 
-    context.setdefault("customer", {"name": None})
-    context.setdefault("business", {"appointment": None, "order": None})
-    context.setdefault(
-        "conversation",
-        {"language": None, "topic": None, "important_facts": []},
-    )
+    if session_id not in conversation_context:
+        conversation_context[session_id] = {
+            "customer": {
+                "name": None
+            },
+            "business": {
+                "appointment": None,
+                "order": None
+            },
+            "conversation": {
+                "language": None,
+                "topic": None,
+                "important_facts": []
+            }
+        }
+
+    context = conversation_context[session_id]
 
     name_patterns = [
         r"\bmy name is ([A-Za-z]+)",
@@ -49,52 +63,57 @@ def update_context(context: dict, message: str) -> dict:
         r"\bi'm ([A-Za-z]+)",
         r"\bcall me ([A-Za-z]+)",
     ]
-
+ 
     for pattern in name_patterns:
         match = re.search(pattern, message, re.IGNORECASE)
-
+ 
         if match:
             context["customer"]["name"] = match.group(1).strip().title()
             break
-
+ 
     if len(message.strip()) > 3:
         important_facts = context["conversation"]["important_facts"]
         if message not in important_facts:
             important_facts.append(message)
-
+ 
     return context
-
-
+ 
+ 
 # ============================================================
 # CONTEXT FORMATTER
 # ============================================================
 
-def build_context_message(context: dict) -> str:
+def build_context_message(session_id: str) -> str:
     """
     Converts stored context into information that can be
     supplied to the LLM.
     """
 
-    context_parts = []
+    context = conversation_context.get(session_id)
 
+    if not context:
+        return ""
+
+    context_parts = []
+ 
     customer = context["customer"]
     conversation = context["conversation"]
-
+ 
     if customer.get("name"):
         context_parts.append(
             f"Customer name: {customer['name']}"
         )
-
+ 
     if conversation.get("language"):
         context_parts.append(
             f"Preferred language: {conversation['language']}"
         )
-
+ 
     if conversation.get("topic"):
         context_parts.append(
             f"Current topic: {conversation['topic']}"
         )
-
+ 
     important_facts = conversation["important_facts"]
     if important_facts:
         context_parts.append(
@@ -104,51 +123,61 @@ def build_context_message(context: dict) -> str:
                 for fact in important_facts[-5:]
             )
         )
-
+ 
     if not context_parts:
         return ""
-
+ 
     return (
         "CONVERSATION CONTEXT:\n"
         + "\n".join(context_parts)
     )
-
-
+ 
+ 
 # ============================================================
 # CHAT ENDPOINT
 # ============================================================
-
+ 
 @router.post("/api/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
-
+ 
     # --------------------------------------------------------
     # Create a session if one doesn't exist
     # --------------------------------------------------------
-
+ 
     session_id = req.session_id or str(uuid4())
 
+    # --------------------------------------------------------
+    # Create history for this session
+    # --------------------------------------------------------
+
+    if session_id not in conversation_history:
+        conversation_history[session_id] = []
+
+  
     # Update context BEFORE calling the LLM
-    await database.ensure_conversation(session_id)
-    context = await database.get_context(session_id)
-    update_context(context, req.message)
-    await database.save_context(session_id, context)
+  
+
+    update_context(
+        session_id=session_id,
+        message=req.message,
+    )
 
     # Get current context
   
 
-    context_message = build_context_message(context)
+    context_message = build_context_message(session_id)
 
    
     # Build messages for the LLM
    
-
+ 
     messages = [
         {
             "role": "system",
             "content": f"{SYSTEM_PROMPT}\n\n{AGENT_INSTRUCTIONS}\n\nBusiness information:\n{BUSINESS_INFO}",
         }
     ]
-
+ 
     # Add context if available
     if context_message:
         messages.append(
@@ -157,9 +186,11 @@ async def chat(req: ChatRequest):
                 "content": context_message,
             }
         )
-
+ 
     # Add previous conversation history
-    messages.extend(await database.get_messages(session_id))
+    messages.extend(
+        conversation_history[session_id]
+    )
 
     # Add current user message
     messages.append(
@@ -169,8 +200,8 @@ async def chat(req: ChatRequest):
         }
     )
     current_turn = [messages[-1]]
-
-  
+ 
+ 
     # Call LLM
    
     try:
@@ -183,21 +214,21 @@ async def chat(req: ChatRequest):
             )
             assistant_message = completion.choices[0].message
             tool_calls = assistant_message.tool_calls or []
-
+ 
             assistant_data = assistant_message.model_dump(exclude_none=True)
             messages.append(assistant_data)
             current_turn.append(assistant_data)
-
+ 
             if not tool_calls:
                 reply = assistant_message.content or ""
                 break
-
+ 
             for tool_call in tool_calls:
                 tool_name = tool_call.function.name
                 tool = AVAILABLE_TOOLS.get(tool_name)
                 if tool is None:
                     raise ValueError(f"Unknown tool requested: {tool_name}")
-
+ 
                 try:
                     arguments = json.loads(tool_call.function.arguments or "{}")
                     result = tool(**arguments)
@@ -205,7 +236,7 @@ async def chat(req: ChatRequest):
                         result = await result
                 except (TypeError, ValueError, json.JSONDecodeError) as exc:
                     result = {"error": f"Tool could not be executed: {exc}"}
-
+ 
                 tool_message = {
                     "role": "tool",
                     "tool_call_id": tool_call.id,
@@ -230,7 +261,7 @@ async def chat(req: ChatRequest):
             status_code=502,
             detail="The language model service is unavailable. Check LLM_API_KEY and try again.",
         ) from exc
-
+ 
     # Save the complete current turn, including tool calls and results.
     await database.add_messages(session_id, current_turn)
     # Return response
@@ -238,3 +269,4 @@ async def chat(req: ChatRequest):
         reply=reply,
         session_id=session_id,
     )
+ 
