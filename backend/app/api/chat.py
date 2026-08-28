@@ -10,14 +10,14 @@ from app.agent.business_info import BUSINESS_INFO
 from app.agent.prompts import AGENT_INSTRUCTIONS, SYSTEM_PROMPT
 from app.agent.tools import AVAILABLE_TOOLS, TOOL_SCHEMAS
 from app.config import settings
+from app.database import database
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
  
 client = AsyncOpenAI(
     api_key=settings.llm_api_key,
-    base_url="https://api.sarvam.ai/v1",
-    default_headers={"api-subscription-key": settings.llm_api_key},
+    base_url="https://api.groq.com/openai/v1",
 )
 # REQUEST / RESPONSE MODELS
 class ChatRequest(BaseModel):
@@ -33,7 +33,7 @@ conversation_history: dict[str, list[dict[str, str]]] = {}
 # CONTEXT STORAGE
 conversation_context: dict[str, dict] = {}
 # CONTEXT MANAGEMENT
-def update_context(context: dict, message: str) -> dict:
+def update_context(session_id: str, message: str) -> dict:
     """
     Extract important information from the user's message
     and store it for the current conversation session.
@@ -145,6 +145,7 @@ async def chat(req: ChatRequest):
     # --------------------------------------------------------
  
     session_id = req.session_id or str(uuid4())
+    await database.ensure_conversation(session_id)
 
     # --------------------------------------------------------
     # Create history for this session

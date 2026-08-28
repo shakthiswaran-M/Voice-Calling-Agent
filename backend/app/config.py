@@ -1,12 +1,13 @@
 from pathlib import Path
 from pydantic_settings import BaseSettings
 
-BASE_DIR = Path(__file__).resolve().parent.parent   # points to backend/
-ENV_PATH = BASE_DIR / ".env"                        # points to backend/.env
+BASE_DIR = Path(__file__).resolve().parent.parent
+ENV_PATH = BASE_DIR / ".env"
 
 class Settings(BaseSettings):
     llm_api_key: str
-    llm_model: str = "sarvam-105b-conversations"
+    llm_model: str = "llama-3.3-70b-versatile"
+    stt_api_key: str
     database_url: str
 
     class Config:
