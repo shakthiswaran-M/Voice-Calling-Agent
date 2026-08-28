@@ -56,9 +56,10 @@ npm install
 npm run dev
 ```
 
-`.env` (never commit this — add to `.gitignore`):
+`backend/.env` (never commit this — add to `.gitignore`):
 ```
 LLM_API_KEY=
+DATABASE_URL=postgresql://postgres:<password>@localhost:5432/voice-agent
 STT_API_KEY=
 TTS_API_KEY=
 EXOTEL_API_KEY=
@@ -66,6 +67,16 @@ EXOTEL_API_TOKEN=
 DATABASE_URL=
 REDIS_URL=
 ```
+
+Create the PostgreSQL database before starting the backend:
+
+```sql
+CREATE DATABASE "voice-agent";
+```
+
+The backend creates the `conversations` and `messages` tables automatically
+when it starts. Set `DATABASE_URL` in `backend/.env` using your PostgreSQL
+credentials.
 
 ## Build Order
 
