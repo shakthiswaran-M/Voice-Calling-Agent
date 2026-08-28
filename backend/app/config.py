@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     llm_api_key: str
     llm_model: str = "llama-3.3-70b-versatile"
     stt_api_key: str
+    elevenlabs_api_key: str
     database_url: str
 
     class Config:
