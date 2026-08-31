@@ -1,13 +1,13 @@
 // src/components/chat/ChatArea.tsx
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useChatStore } from '../../store/useChatStore';
 import { MessageBubble } from './MessageBubble';
 import { ChatInput } from './ChatInput';
 import { useAutoScroll } from '../../hooks/useAutoScroll';
 import { ArrowDown, Menu, Mic, /*Brain, Shield,*/ Users, Briefcase, Globe, Award } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { sendChatMessage, ApiError } from '../../lib/api';
+import { sendChatMessage, transcribeAudio, synthesizeSpeech, ApiError } from '../../lib/api';
 
 const FALLBACK_ERROR_RESPONSE =
   "Sorry, I couldn't reach the assistant just now. Please check that the backend is running and try again.";
@@ -71,6 +71,9 @@ export function ChatArea() {
   const { containerRef, showScrollButton, handleScroll, scrollToBottom, scrollToBottomOnSend } = useAutoScroll([messages.length]);
   const [startListening, setStartListening] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   const handleSendMessage = async (content: string) => {
     const threadId = activeThreadId || createThread().id;
@@ -95,9 +98,57 @@ export function ChatArea() {
     }
   };
 
-  const handleStartConversation = () => {
-    setStartListening(true);
-    setTimeout(() => setStartListening(false), 100);
+  const handleStartConversation = async () => {
+    if (isRecording) {
+      mediaRecorderRef.current?.stop();
+      setIsRecording(false);
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (e) => audioChunksRef.current.push(e.data);
+
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop());
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+
+        const threadId = activeThreadId || createThread().id;
+        setIsSending(true);
+        try {
+          const transcript = await transcribeAudio(audioBlob);
+          if (!transcript || !transcript.trim()) {
+            addMessage(threadId, { role: 'bot', content: "Sorry, I didn't catch that." });
+            return;
+          }
+          addMessage(threadId, { role: 'user', content: transcript });
+
+          const thread = useChatStore.getState().threads.find((t) => t.id === threadId);
+          const { reply, session_id } = await sendChatMessage(transcript, thread?.sessionId);
+          if (!thread?.sessionId) setThreadSessionId(threadId, session_id);
+          addMessage(threadId, { role: 'bot', content: reply || '(no response)' });
+
+          const audioReply = await synthesizeSpeech(reply);
+          const audioUrl = URL.createObjectURL(audioReply);
+          const audio = new Audio(audioUrl);
+          audio.play();
+        } catch (err) {
+          const message = err instanceof ApiError ? err.message : FALLBACK_ERROR_RESPONSE;
+          addMessage(threadId, { role: 'bot', content: message });
+        } finally {
+          setIsSending(false);
+        }
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error('Microphone access denied or unavailable:', err);
+    }
   };
 
   useEffect(() => {
@@ -183,7 +234,7 @@ export function ChatArea() {
               )}
             </div>
           </div>
-          <div className="shrink-0"><ChatInput onSend={handleSendMessage} disabled={!activeThreadId || isSending} isDarkMode={isDarkMode} /></div>
+          <div className="shrink-0"><ChatInput onSend={handleSendMessage} disabled={!activeThreadId || isSending} isDarkMode={isDarkMode} onVoiceToggle={handleStartConversation} isRecording={isRecording} /></div>
         </>
       ) : (
         /* ═══ WELCOME: Futuristic AI Assistant ═══ */
@@ -219,32 +270,11 @@ export function ChatArea() {
                   </span>
                 </h1>
 
-                {/* Feature cards */}
-                {/* <div className="grid grid-cols-3 gap-3 mb-6 max-w-md mx-auto lg:mx-0">
-                  {[
-                    { icon: Mic, label: 'Voice-First', desc: 'Speak naturally, we understand you.', color: 'cyan' },
-                    { icon: Brain, label: 'AI-Powered', desc: 'Advanced intelligence for accurate answers.', color: 'purple' },
-                    { icon: Shield, label: 'Secure & Private', desc: 'Your data is safe and protected.', color: 'cyan' },
-                  ].map(({ icon: Icon, label, desc, color }, i) => (
-                    <div
-                      key={i}
-                      className={`feature-card feature-card-${color} card-pop-in`}
-                      style={{ animationDelay: `${0.3 + i * 0.1}s` }}
-                    >
-                      <div className={`feature-icon feature-icon-${color}`}>
-                        <Icon className="w-4 h-4" />
-                      </div>
-                      <span className={cn('text-[11px] font-semibold', isDarkMode ? 'text-white' : 'text-midnight-800')}>{label}</span>
-                      <span className={cn('text-[9px] leading-tight', isDarkMode ? 'text-white/40' : 'text-midnight-400')}>{desc}</span>
-                    </div>
-                  ))}
-                </div> */}
-
                 {/* CTA buttons */}
                 <div className="flex flex-wrap items-center gap-3 justify-center lg:justify-start mb-6 card-pop-in" style={{ animationDelay: '0.6s' }}>
                   <button className="cta-primary" onClick={handleStartConversation}>
                     <Mic className="w-4 h-4" />
-                    Start Conversation
+                    {isRecording ? 'Stop & Send' : 'Start Conversation'}
                   </button>
                 </div>
 
@@ -277,7 +307,9 @@ export function ChatArea() {
                 <AiRobot />
                 <div className={cn('listening-badge', !isDarkMode && 'listening-badge-light')}>
                   <span className="listening-dot" />
-                  <span className={cn('text-[10px] font-medium', isDarkMode ? 'text-white/60' : 'text-midnight-400')}>Listening...</span>
+                  <span className={cn('text-[10px] font-medium', isDarkMode ? 'text-white/60' : 'text-midnight-400')}>
+                    {isRecording ? 'Listening...' : 'Ready'}
+                  </span>
                 </div>
               </div>
             </div>
@@ -285,12 +317,10 @@ export function ChatArea() {
 
           {/* Input pinned to bottom */}
           <div className="shrink-0 relative z-10">
-            <ChatInput onSend={handleSendMessage} disabled={!activeThreadId || isSending} isCentered isDarkMode={isDarkMode} startListening={startListening} />
+            <ChatInput onSend={handleSendMessage} disabled={!activeThreadId || isSending} isCentered isDarkMode={isDarkMode} onVoiceToggle={handleStartConversation} isRecording={isRecording} />
           </div>
         </div>
       )}
     </main>
   );
 }
-
-
