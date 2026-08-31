@@ -5,6 +5,7 @@ import { Message } from '../../types';
 import { formatTimestamp } from '../../store/useChatStore';
 import { Copy, RefreshCw, Check, User } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import logo from '../../assets/netkathir-logo.png';
 
 interface MessageBubbleProps {
   message: Message;
@@ -50,8 +51,8 @@ export function MessageBubble({ message, index = 0, isDarkMode = true, onRegener
       ) : (
         <div className="max-w-[80%] md:max-w-[72%]">
           <div className="flex items-center gap-2 mb-2">
-            <div className={cn('w-6 h-6 rounded-md flex items-center justify-center', isDarkMode ? 'bg-gradient-to-br from-cyan-500/20 to-purple-500/20 border border-cyan-500/20' : 'bg-gradient-to-br from-cyan-100 to-purple-100 border border-cyan-200/50')}>
-              <span className={cn('text-[10px] font-serif font-bold', isDarkMode ? 'text-cyan-400' : 'text-cyan-600')}>n</span>
+            <div className={cn('w-6 h-6 rounded-md flex items-center justify-center overflow-hidden', isDarkMode ? 'bg-white/5 border border-white/10' : 'bg-white border border-midnight-100')}>
+              <img src={logo} alt="" className="w-full h-full object-contain p-0.5" />
             </div>
             <span className={cn('text-[10px] font-semibold tracking-wider uppercase', isDarkMode ? 'text-cyan-400/60' : 'text-cyan-600/70')}>
               netKathir

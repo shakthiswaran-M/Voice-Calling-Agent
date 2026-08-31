@@ -6,6 +6,7 @@ import { formatTimestamp } from '../../store/useChatStore';
 import type { Thread } from '../../types';
 import { Plus, Trash2, Edit2, Check, X, Moon, Sun, MessageCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import logo from '../../assets/netkathir-logo.png';
 
 export function ThreadNav() {
   const {
@@ -97,15 +98,7 @@ export function ThreadNav() {
         {/* Header — Brand + New Chat */}
         <div className="p-5 pb-4">
           <div className="flex items-center gap-3 mb-4">
-            <div className="sidebar-orb-wrapper" style={{ width: 36, height: 36 }}>
-              <div className="sidebar-orb-aurora" />
-              <div className="sidebar-orb-core">
-                <div className="sidebar-orb-plasma" />
-                <div className="sidebar-orb-spin" />
-                <div className="sidebar-orb-shine" />
-                <div className="sidebar-orb-highlight" />
-              </div>
-            </div>
+            <img src={logo} alt="netKathir" className="w-9 h-9 object-contain" />
             <div>
               <h1 className={cn('font-serif text-base font-semibold tracking-tight leading-none', isDarkMode ? 'text-white' : 'text-midnight-900')}>
                 netKathir
