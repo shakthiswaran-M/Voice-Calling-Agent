@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 from app.providers.stt import transcribe_audio
 from app.providers.tts import synthesize_speech
+from app.providers.exotel import place_call
 
 router = APIRouter()
 
@@ -30,3 +31,22 @@ async def tts_test(req: TTSRequest):
             "Content-Disposition": "attachment; filename=tts_test.mp3"
         },
     )
+
+
+class ExotelCallRequest(BaseModel):
+    customer_number: str
+    caller_id: str | None = None
+
+
+@router.post("/api/exotel/call")
+async def exotel_call(req: ExotelCallRequest):
+    result = await place_call(
+        customer_number=req.customer_number,
+        caller_id=req.caller_id,
+    )
+
+    return {
+        "success": True,
+        "message": "Exotel call initiated",
+        "data": result,
+    }
