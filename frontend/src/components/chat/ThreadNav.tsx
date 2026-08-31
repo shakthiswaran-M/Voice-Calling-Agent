@@ -1,44 +1,101 @@
-// src/components/chat/ThreadNav.tsx
-
 import { useState, useRef, type KeyboardEvent, type MouseEvent } from 'react';
 import { useChatStore } from '../../store/useChatStore';
 import { formatTimestamp } from '../../store/useChatStore';
 import type { Thread } from '../../types';
-import { Plus, Trash2, Edit2, Check, X, Moon, Sun, MessageCircle, ChevronLeft, ChevronRight } from 'lucide-react';
+import {
+  Plus,
+  Trash2,
+  Edit2,
+  Check,
+  X,
+  Moon,
+  Sun,
+  MessageCircle,
+  ChevronLeft,
+  ChevronRight,
+} from 'lucide-react';
 import { cn } from '../../lib/utils';
 import logo from '../../assets/netkathir-logo.png';
 
 export function ThreadNav() {
   const {
-    threads, activeThreadId, editingThreadId, isDarkMode, isSidebarOpen,
-    createThread, deleteThread, updateThreadTitle, setActiveThread,
-    setEditingThread, toggleDarkMode, toggleSidebar,
+    threads,
+    activeThreadId,
+    editingThreadId,
+    isDarkMode,
+    isSidebarOpen,
+    createThread,
+    deleteThread,
+    updateThreadTitle,
+    setActiveThread,
+    setEditingThread,
+    toggleDarkMode,
+    toggleSidebar,
   } = useChatStore();
 
   const [editTitle, setEditTitle] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleDeleteThread = (e: MouseEvent, threadId: string) => {
+  const handleDeleteThread = (
+    e: MouseEvent,
+    threadId: string
+  ) => {
     e.stopPropagation();
-    if (window.confirm('Delete this thread?')) deleteThread(threadId);
+
+    if (window.confirm('Delete this conversation?')) {
+      deleteThread(threadId);
+    }
   };
 
-  const handleEditClick = (e: MouseEvent, thread: Thread) => {
+  const handleEditClick = (
+    e: MouseEvent,
+    thread: Thread
+  ) => {
     e.stopPropagation();
+
     setEditTitle(thread.title);
     setEditingThread(thread.id);
-    setTimeout(() => inputRef.current?.focus(), 0);
+
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 0);
   };
 
   const handleSaveTitle = (threadId: string) => {
-    if (editTitle.trim()) updateThreadTitle(threadId, editTitle.trim());
+    if (editTitle.trim()) {
+      updateThreadTitle(threadId, editTitle.trim());
+    }
+
     setEditingThread(null);
     setEditTitle('');
   };
 
-  const handleKeyDown = (e: KeyboardEvent, threadId: string) => {
-    if (e.key === 'Enter') handleSaveTitle(threadId);
-    else if (e.key === 'Escape') setEditingThread(null);
+  const handleKeyDown = (
+    e: KeyboardEvent,
+    threadId: string
+  ) => {
+    if (e.key === 'Enter') {
+      handleSaveTitle(threadId);
+    } else if (e.key === 'Escape') {
+      setEditingThread(null);
+      setEditTitle('');
+    }
+  };
+
+  const handleThreadSelect = (threadId: string) => {
+    setActiveThread(threadId);
+
+    if (window.innerWidth < 1024 && isSidebarOpen) {
+      toggleSidebar();
+    }
+  };
+
+  const handleNewChat = () => {
+    createThread();
+
+    if (window.innerWidth < 1024 && isSidebarOpen) {
+      toggleSidebar();
+    }
   };
 
   return (
@@ -47,193 +104,453 @@ export function ThreadNav() {
       {isSidebarOpen && (
         <div
           className={cn(
-            'fixed inset-0 backdrop-blur-sm z-40 lg:hidden transition-opacity duration-300',
-            isDarkMode ? 'bg-black/50' : 'bg-black/20'
+            'fixed inset-0 z-40 lg:hidden transition-opacity duration-300',
+            isDarkMode
+              ? 'bg-black/60 backdrop-blur-sm'
+              : 'bg-black/25 backdrop-blur-sm'
           )}
           onClick={toggleSidebar}
+          aria-hidden="true"
         />
       )}
 
-      {/* Collapsed Toggle Button */}
+      {/* Desktop Open Sidebar Button */}
       {!isSidebarOpen && (
         <button
           onClick={toggleSidebar}
           className={cn(
-            'hidden lg:flex fixed left-4 top-20 z-50 items-center gap-2 px-3 py-2 rounded-xl shadow-lg transition-all duration-300',
+            'hidden lg:flex fixed left-4 top-20 z-50',
+            'items-center justify-center',
+            'w-10 h-10 rounded-xl',
+            'shadow-lg transition-all duration-300',
             isDarkMode
-              ? 'bg-white/5 border border-white/10 text-white hover:bg-white/10'
+              ? 'bg-[#0A1628] border border-white/10 text-white hover:bg-white/10'
               : 'bg-white border border-midnight-200 shadow-xl hover:bg-ivory-100'
           )}
           aria-label="Open sidebar"
         >
-          <ChevronRight className={cn('w-4 h-4', isDarkMode ? 'text-white' : 'text-midnight-900')} />
+          <ChevronRight
+            className={cn(
+              'w-4 h-4',
+              isDarkMode ? 'text-white' : 'text-midnight-900'
+            )}
+          />
         </button>
       )}
 
       {/* Sidebar */}
-      <aside className={cn(
-        'fixed lg:relative z-50 h-full flex flex-col transition-all duration-500 ease-out backdrop-blur-md',
-        isDarkMode
-          ? 'bg-[#0a0e27]/95 border-white/5'
-          : 'bg-white/80 border-midnight-200/50',
-        'w-64 border-r',
-        isSidebarOpen
-          ? 'translate-x-0'
-          : '-translate-x-full lg:translate-x-0 lg:w-0 lg:overflow-hidden lg:border-0'
-      )}>
-        {/* Close Button */}
-        <button
-          onClick={toggleSidebar}
-          className={cn(
-            'absolute right-3 top-4 lg:-right-3 lg:top-6 z-10 w-7 h-7 flex items-center justify-center rounded-full shadow-lg transition-all duration-300',
-            isDarkMode
-              ? 'bg-[#0a0e27] border border-white/10 hover:bg-white/10'
-              : 'bg-white border border-midnight-200/50 hover:bg-ivory-100'
-          )}
-          aria-label="Close sidebar"
-        >
-          <ChevronLeft className={cn('w-3.5 h-3.5', isDarkMode ? 'text-white/50' : 'text-midnight-400')} />
-        </button>
-
-        {/* Header — Brand + New Chat */}
+      <aside
+        className={cn(
+          'fixed lg:relative z-50 h-full',
+          'flex flex-col',
+          'transition-all duration-300 ease-out',
+          'backdrop-blur-md',
+          'border-r',
+          isDarkMode
+            ? 'bg-[#0A1628]/98 border-white/5'
+            : 'bg-white/95 border-midnight-200/50',
+          'w-[85vw] max-w-[360px]',
+          'lg:w-64',
+          isSidebarOpen
+            ? 'translate-x-0'
+            : '-translate-x-full lg:translate-x-0 lg:w-0 lg:overflow-hidden lg:border-0'
+        )}
+      >
+        {/* Header */}
         <div className="p-5 pb-4">
-          <div className="flex items-center gap-3 mb-4">
-            <img src={logo} alt="netKathir" className="w-9 h-9 object-contain" />
-            <div>
-              <h1 className={cn('font-serif text-base font-semibold tracking-tight leading-none', isDarkMode ? 'text-white' : 'text-midnight-900')}>
-                netKathir
-              </h1>
-              <p className={cn('text-[9px] tracking-[0.2em] uppercase font-medium', isDarkMode ? 'text-cyan-400/60' : 'text-cyan-600/60')}>
-                Bot
-              </p>
+          <div className="flex items-center justify-between">
+            {/* Brand */}
+            <div className="flex items-center gap-3">
+              <img
+                src={logo}
+                alt="netKathir"
+                className="w-10 h-10 object-contain"
+              />
+
+              <div>
+                <h1
+                  className={cn(
+                    'font-serif text-base font-semibold tracking-tight leading-none',
+                    isDarkMode
+                      ? 'text-white'
+                      : 'text-midnight-900'
+                  )}
+                >
+                  netKathir
+                </h1>
+
+                <p className="text-[9px] tracking-[0.2em] uppercase font-medium mt-1 text-[#4CAF50]">
+                  AI Assistant
+                </p>
+              </div>
             </div>
+
+            {/* Mobile Close */}
+            <button
+              onClick={toggleSidebar}
+              className={cn(
+                'lg:hidden flex items-center justify-center',
+                'w-9 h-9 rounded-xl',
+                'transition-colors',
+                isDarkMode
+                  ? 'hover:bg-white/10 text-white/60'
+                  : 'hover:bg-ivory-100 text-midnight-400'
+              )}
+              aria-label="Close sidebar"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
 
-          <div className="flex gap-2">
+          {/* New Chat + Theme */}
+          <div className="flex gap-2 mt-5">
             <button
-              onClick={() => createThread()}
-              className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 bg-cyan-500 text-[#050816] rounded-xl text-xs font-semibold tracking-wide hover:bg-cyan-400 transition-all duration-300 active:scale-[0.97]"
+              onClick={handleNewChat}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-2',
+                'px-3 py-3 rounded-xl',
+                'text-xs font-semibold tracking-wide',
+                'transition-all duration-200',
+                'active:scale-[0.97]',
+                'bg-[#4CAF50] text-white',
+                'hover:bg-[#43A047]',
+                'shadow-[0_4px_14px_rgba(76,175,80,0.18)]'
+              )}
             >
-              <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
+              <Plus
+                className="w-4 h-4"
+                strokeWidth={2.5}
+              />
               New Chat
             </button>
+
             <button
               onClick={toggleDarkMode}
               className={cn(
-                'p-2.5 rounded-xl border transition-all duration-300',
-                isDarkMode ? 'border-white/10 hover:bg-white/5' : 'border-midnight-200/50 hover:bg-ivory-100'
+                'w-11 h-11 flex items-center justify-center',
+                'rounded-xl border',
+                'transition-all duration-200',
+                isDarkMode
+                  ? 'border-white/10 hover:bg-white/5'
+                  : 'border-midnight-200/50 hover:bg-ivory-100'
               )}
               aria-label="Toggle dark mode"
             >
-              {isDarkMode
-                ? <Sun className="w-4 h-4 text-amber-400" />
-                : <Moon className="w-4 h-4 text-midnight-400" />
-              }
+              {isDarkMode ? (
+                <Sun className="w-4 h-4 text-amber-400" />
+              ) : (
+                <Moon className="w-4 h-4 text-midnight-400" />
+              )}
             </button>
           </div>
         </div>
 
-        <div className={cn('mx-5 h-px', isDarkMode ? 'bg-gradient-to-r from-transparent via-white/10 to-transparent' : 'bg-gradient-to-r from-transparent via-midnight-200/40 to-transparent')} />
+        {/* Divider */}
+        <div
+          className={cn(
+            'mx-5 h-px',
+            isDarkMode
+              ? 'bg-white/10'
+              : 'bg-midnight-200/40'
+          )}
+        />
+
+        {/* Conversation Heading */}
+        <div className="px-5 pt-5 pb-2">
+          <p
+            className={cn(
+              'text-[10px] font-semibold tracking-[0.15em] uppercase',
+              isDarkMode
+                ? 'text-white/30'
+                : 'text-midnight-400'
+            )}
+          >
+            Conversations
+          </p>
+        </div>
 
         {/* Thread List */}
-        <div className="flex-1 overflow-y-auto p-3 space-y-1">
+        <div className="flex-1 overflow-y-auto px-3 pb-4 space-y-1">
           {threads.length === 0 ? (
-            <div className="text-center py-10">
-              <MessageCircle className={cn('w-8 h-8 mx-auto mb-3', isDarkMode ? 'text-white/15' : 'text-midnight-200')} />
-              <p className={cn('text-xs font-medium', isDarkMode ? 'text-white/40' : 'text-midnight-400')}>No conversations yet</p>
-              <p className={cn('text-[10px] mt-1', isDarkMode ? 'text-white/20' : 'text-midnight-300')}>Start one with the button above</p>
-            </div>
-          ) : (
-            threads.map((thread) => (
+            <div className="text-center py-12 px-5">
               <div
-                key={thread.id}
-                onClick={() => setActiveThread(thread.id)}
                 className={cn(
-                  'group relative flex items-center gap-3 px-3.5 py-3 rounded-xl cursor-pointer transition-all duration-300',
-                  activeThreadId === thread.id
-                    ? isDarkMode
-                      ? 'bg-cyan-500/10 text-white border border-cyan-500/20'
-                      : 'bg-cyan-500/10 text-midnight-900 border border-cyan-500/20'
-                    : isDarkMode
-                      ? 'text-white/50 hover:bg-white/5 hover:text-white/70'
-                      : 'text-midnight-600 hover:bg-ivory-100 hover:text-midnight-800'
+                  'w-12 h-12 mx-auto mb-4 rounded-2xl',
+                  'flex items-center justify-center',
+                  isDarkMode
+                    ? 'bg-white/5'
+                    : 'bg-ivory-100'
                 )}
               >
-                {activeThreadId === thread.id && (
-                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-gradient-to-b from-cyan-400 to-purple-500 rounded-r-full" />
-                )}
+                <MessageCircle
+                  className={cn(
+                    'w-6 h-6',
+                    isDarkMode
+                      ? 'text-white/20'
+                      : 'text-midnight-200'
+                  )}
+                />
+              </div>
 
-                {editingThreadId === thread.id ? (
-                  <div className="flex items-center gap-1.5 w-full" onClick={(e) => e.stopPropagation()}>
-                    <input
-                      ref={inputRef}
-                      type="text"
-                      value={editTitle}
-                      onChange={(e) => setEditTitle(e.target.value)}
-                      onBlur={() => handleSaveTitle(thread.id)}
-                      onKeyDown={(e) => handleKeyDown(e, thread.id)}
+              <p
+                className={cn(
+                  'text-xs font-medium',
+                  isDarkMode
+                    ? 'text-white/50'
+                    : 'text-midnight-500'
+                )}
+              >
+                No conversations yet
+              </p>
+
+              <p
+                className={cn(
+                  'text-[10px] mt-1.5 leading-relaxed',
+                  isDarkMode
+                    ? 'text-white/25'
+                    : 'text-midnight-300'
+                )}
+              >
+                Start a new conversation using the button above.
+              </p>
+            </div>
+          ) : (
+            threads.map((thread) => {
+              const isActive =
+                activeThreadId === thread.id;
+
+              return (
+                <div
+                  key={thread.id}
+                  onClick={() =>
+                    handleThreadSelect(thread.id)
+                  }
+                  className={cn(
+                    'group relative flex items-center gap-3',
+                    'px-3 py-3.5 rounded-xl',
+                    'cursor-pointer',
+                    'transition-all duration-200',
+                    'min-h-[58px]',
+                    isActive
+                      ? isDarkMode
+                        ? 'bg-[#4CAF50]/10 text-white border border-[#4CAF50]/20'
+                        : 'bg-[#4CAF50]/10 text-midnight-900 border border-[#4CAF50]/20'
+                      : isDarkMode
+                        ? 'text-white/50 hover:bg-white/5 hover:text-white/80'
+                        : 'text-midnight-600 hover:bg-ivory-100 hover:text-midnight-800'
+                  )}
+                >
+                  {/* Active Indicator */}
+                  {isActive && (
+                    <div
                       className={cn(
-                        'flex-1 min-w-0 px-2 py-1 text-xs bg-transparent border-b border-cyan-400/30 focus:outline-none focus:border-cyan-500 transition-colors',
-                        isDarkMode ? 'text-white' : 'text-midnight-900'
+                        'absolute left-0 top-1/2',
+                        '-translate-y-1/2',
+                        'w-[3px] h-6',
+                        'bg-[#4CAF50]',
+                        'rounded-r-full'
                       )}
                     />
-                    <button onClick={() => handleSaveTitle(thread.id)} className="p-1 rounded-md hover:bg-white/10 transition-colors">
-                      <Check className={cn('w-3 h-3', isDarkMode ? 'text-cyan-400' : 'text-cyan-600')} />
-                    </button>
-                    <button onClick={() => setEditingThread(null)} className="p-1 rounded-md hover:bg-white/10 transition-colors">
-                      <X className={cn('w-3 h-3', isDarkMode ? 'text-white/40' : 'text-midnight-300')} />
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex-1 min-w-0">
-                      <h3 className={cn(
-                        'text-xs font-medium truncate',
-                        activeThreadId === thread.id
-                          ? isDarkMode ? 'text-white' : 'text-midnight-900'
-                          : isDarkMode ? 'text-white/60' : 'text-midnight-700'
-                      )}>
-                        {thread.title}
-                      </h3>
-                      <p className={cn(
-                        'text-[10px] mt-0.5 tabular-nums',
-                        activeThreadId === thread.id
-                          ? isDarkMode ? 'text-cyan-400/40' : 'text-cyan-600/40'
-                          : isDarkMode ? 'text-white/25' : 'text-midnight-300'
-                      )}>
-                        {formatTimestamp(thread.updatedAt)}
-                      </p>
-                    </div>
+                  )}
 
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                  {editingThreadId === thread.id ? (
+                    <div
+                      className="flex items-center gap-1.5 w-full"
+                      onClick={(e) =>
+                        e.stopPropagation()
+                      }
+                    >
+                      <input
+                        ref={inputRef}
+                        type="text"
+                        value={editTitle}
+                        onChange={(e) =>
+                          setEditTitle(e.target.value)
+                        }
+                        onBlur={() =>
+                          handleSaveTitle(thread.id)
+                        }
+                        onKeyDown={(e) =>
+                          handleKeyDown(
+                            e,
+                            thread.id
+                          )
+                        }
+                        className={cn(
+                          'flex-1 min-w-0',
+                          'px-2 py-2 text-xs',
+                          'bg-transparent',
+                          'border-b',
+                          'focus:outline-none',
+                          isDarkMode
+                            ? 'text-white border-[#4CAF50]/40 focus:border-[#4CAF50]'
+                            : 'text-midnight-900 border-[#4CAF50]/40 focus:border-[#4CAF50]'
+                        )}
+                      />
+
                       <button
-                        onClick={(e) => handleEditClick(e, thread)}
-                        className="p-1 rounded-md hover:bg-white/10 transition-colors"
-                        aria-label="Edit thread"
+                        onClick={() =>
+                          handleSaveTitle(thread.id)
+                        }
+                        className="p-2 rounded-lg hover:bg-[#4CAF50]/10 transition-colors"
+                        aria-label="Save conversation name"
                       >
-                        <Edit2 className={cn('w-3 h-3', isDarkMode ? 'text-white/40' : 'text-midnight-300')} />
+                        <Check className="w-4 h-4 text-[#4CAF50]" />
                       </button>
+
                       <button
-                        onClick={(e) => handleDeleteThread(e, thread.id)}
-                        className="p-1 rounded-md hover:bg-red-500/10 text-red-400/50 hover:text-red-400 transition-colors"
-                        aria-label="Delete thread"
+                        onClick={() => {
+                          setEditingThread(null);
+                          setEditTitle('');
+                        }}
+                        className="p-2 rounded-lg hover:bg-white/10 transition-colors"
+                        aria-label="Cancel editing"
                       >
-                        <Trash2 className="w-3 h-3" />
+                        <X
+                          className={cn(
+                            'w-4 h-4',
+                            isDarkMode
+                              ? 'text-white/40'
+                              : 'text-midnight-300'
+                          )}
+                        />
                       </button>
                     </div>
-                  </>
-                )}
-              </div>
-            ))
+                  ) : (
+                    <>
+                      {/* Thread Content */}
+                      <div className="flex-1 min-w-0">
+                        <h3
+                          className={cn(
+                            'text-xs font-medium truncate',
+                            isActive
+                              ? isDarkMode
+                                ? 'text-white'
+                                : 'text-midnight-900'
+                              : isDarkMode
+                                ? 'text-white/65'
+                                : 'text-midnight-700'
+                          )}
+                        >
+                          {thread.title}
+                        </h3>
+
+                        <p
+                          className={cn(
+                            'text-[10px] mt-1 tabular-nums',
+                            isActive
+                              ? 'text-[#4CAF50]/70'
+                              : isDarkMode
+                                ? 'text-white/25'
+                                : 'text-midnight-300'
+                          )}
+                        >
+                          {formatTimestamp(
+                            thread.updatedAt
+                          )}
+                        </p>
+                      </div>
+
+                      {/* Edit/Delete Actions */}
+                      <div
+                        className={cn(
+                          'flex items-center gap-0.5',
+                          'transition-opacity duration-200',
+                          'opacity-100 lg:opacity-0 lg:group-hover:opacity-100'
+                        )}
+                      >
+                        <button
+                          onClick={(e) =>
+                            handleEditClick(
+                              e,
+                              thread
+                            )
+                          }
+                          className={cn(
+                            'w-9 h-9 flex items-center justify-center',
+                            'rounded-lg transition-colors',
+                            isDarkMode
+                              ? 'hover:bg-white/10'
+                              : 'hover:bg-midnight-100'
+                          )}
+                          aria-label="Edit conversation"
+                        >
+                          <Edit2
+                            className={cn(
+                              'w-3.5 h-3.5',
+                              isDarkMode
+                                ? 'text-white/40'
+                                : 'text-midnight-300'
+                            )}
+                          />
+                        </button>
+
+                        <button
+                          onClick={(e) =>
+                            handleDeleteThread(
+                              e,
+                              thread.id
+                            )
+                          }
+                          className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-red-500/10 transition-colors"
+                          aria-label="Delete conversation"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-red-400/60 hover:text-red-400" />
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })
           )}
         </div>
 
         {/* Footer */}
-        <div className={cn('p-4 border-t', isDarkMode ? 'border-white/5' : 'border-midnight-100/50')}>
-          <p className={cn('text-[9px] text-center tracking-wider uppercase', isDarkMode ? 'text-white/15' : 'text-midnight-300')}>
-            Crafted with React + TypeScript
+        <div
+          className={cn(
+            'px-4 py-3 border-t',
+            isDarkMode
+              ? 'border-white/5'
+              : 'border-midnight-100/50'
+          )}
+        >
+          <p
+            className={cn(
+              'text-[9px] text-center tracking-wider uppercase',
+              isDarkMode
+                ? 'text-white/15'
+                : 'text-midnight-300'
+            )}
+          >
+            netKathir AI Assistant
           </p>
         </div>
+
+        {/* Desktop Close Button */}
+        <button
+          onClick={toggleSidebar}
+          className={cn(
+            'hidden lg:flex absolute',
+            'right-[-14px] top-6 z-10',
+            'w-7 h-7 items-center justify-center',
+            'rounded-full shadow-lg',
+            'transition-all duration-300',
+            isDarkMode
+              ? 'bg-[#0A1628] border border-white/10 hover:bg-white/10'
+              : 'bg-white border border-midnight-200/50 hover:bg-ivory-100'
+          )}
+          aria-label="Close sidebar"
+        >
+          <ChevronLeft
+            className={cn(
+              'w-3.5 h-3.5',
+              isDarkMode
+                ? 'text-white/50'
+                : 'text-midnight-400'
+            )}
+          />
+        </button>
       </aside>
     </>
   );

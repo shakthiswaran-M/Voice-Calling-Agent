@@ -137,7 +137,7 @@ export function ChatArea() {
 
           {/* Scrollable messages */}
           <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto min-h-0">
-            <div className="max-w-3xl mx-auto px-6 md:px-8 py-10 space-y-8">
+            <div className="max-w-5xl w-full mx-auto px-6 md:px-8 py-10 space-y-8">
               <div className="text-center mb-8 message-slide-in">
                 <h2 className={cn('font-serif text-2xl md:text-3xl font-semibold tracking-tight', isDarkMode ? 'text-white' : 'text-midnight-900')}>{activeThread?.title}</h2>
                 <div className="editorial-rule w-16 mx-auto mt-4" />
@@ -188,7 +188,7 @@ export function ChatArea() {
         /* ═══ WELCOME: simple, quiet, on-brand ═══ */
         <div className="flex-1 flex flex-col min-h-0">
           <div className="flex-1 flex flex-col items-center justify-center px-6 min-h-0">
-            <img src={logo} alt="netKathir" className="w-16 h-16 object-contain mb-6 message-slide-in" />
+            <img src={logo} alt="netKathir" className="w-48 h-48 object-contain mb-6 message-slide-in" />
             <h1 className={cn('font-serif text-2xl md:text-3xl font-semibold text-center mb-2 message-slide-in', isDarkMode ? 'text-white' : 'text-midnight-900')} style={{ animationDelay: '0.1s' }}>
               How can I help you today?
             </h1>
