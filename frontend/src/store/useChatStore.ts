@@ -132,6 +132,42 @@ export const useChatStore = create<ChatStore>()(
           return { scrollPositions: rest };
         });
       },
+
+      markThreadRead: (threadId: string) => {
+        set((state) => ({
+          threads: state.threads.map((t) =>
+            t.id === threadId ? { ...t, unreadCount: 0 } : t
+          ),
+        }));
+      },
+
+      incrementUnread: (threadId: string) => {
+        set((state) => ({
+          threads: state.threads.map((t) =>
+            t.id === threadId ? { ...t, unreadCount: (t.unreadCount || 0) + 1 } : t
+          ),
+        }));
+      },
+
+      togglePinMessage: (threadId: string, messageId: string) => {
+        set((state) => ({
+          threads: state.threads.map((t) =>
+            t.id === threadId
+              ? { ...t, messages: t.messages.map((m) =>
+                  m.id === messageId ? { ...m, pinned: !m.pinned } : m
+                ) }
+              : t
+          ),
+        }));
+      },
+
+      setReplyTo: (threadId: string, messageId: string | null) => {
+        set((state) => ({
+          threads: state.threads.map((t) =>
+            t.id === threadId ? { ...t, replyTo: messageId } : t
+          ),
+        }));
+      },
     }),
     { name: 'netkathir-chat-v2' }
   )
