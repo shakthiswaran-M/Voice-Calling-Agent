@@ -25,7 +25,7 @@ function App() {
       const store = useChatStore.getState();
       if (!store.isSidebarOpen) store.toggleSidebar();
       setTimeout(() => {
-        const input = document.querySelector<HTMLInputElement>('input[placeholder="Search..."]');
+        const input = document.querySelector<HTMLInputElement>('input[placeholder*="Search"]');
         input?.focus();
       }, 350);
     }

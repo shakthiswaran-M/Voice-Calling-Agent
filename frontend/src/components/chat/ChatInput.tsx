@@ -59,10 +59,6 @@ export function ChatInput({
   const hasContent = message.trim().length > 0;
 
   const inputBg = isDarkMode ? 'bg-white/[0.03]' : 'bg-white';
-  const inputBorder = isDarkMode ? 'border-white/10' : 'border-green-200/60';
-  const inputBorderFocus = isDarkMode
-    ? 'border-green-500/40 shadow-input-focus bg-white/[0.05]'
-    : 'border-green-400 shadow-input-focus bg-white';
 
   const textColor = isDarkMode ? 'text-white' : 'text-midnight-900';
   const placeholderColor = isDarkMode
@@ -92,10 +88,8 @@ export function ChatInput({
           className={cn(
             'relative rounded-2xl border transition-all duration-300',
             isFocused || isRecording
-              ? inputBorderFocus
-              : `${inputBg} ${
-                  isDarkMode ? 'border-white/10' : 'border-green-200/60'
-                }`
+              ? `${inputBg} border-green-400/50`
+              : `${inputBg} ${isDarkMode ? 'border-white/10' : 'border-green-200/60'}`
           )}
         >
           {replyToMessage && (
@@ -142,7 +136,7 @@ export function ChatInput({
             disabled={disabled}
             rows={1}
             className={cn(
-              'w-full resize-none bg-transparent text-sm sm:text-base focus:outline-none border-none px-4 sm:px-6 py-4 sm:py-5 pr-20 sm:pr-24 max-h-[120px] leading-relaxed font-light',
+              'w-full resize-none bg-transparent text-sm sm:text-base outline-none border-none ring-0 focus:outline-none focus:border-none focus:ring-0 px-4 sm:px-6 py-4 sm:py-5 pr-20 sm:pr-24 max-h-[120px] leading-relaxed font-light',
               textColor,
               placeholderColor
             )}
@@ -227,8 +221,8 @@ export function ChatInput({
           className={cn(
             'flex items-center gap-1 rounded-2xl border transition-all duration-300 pr-1',
             isFocused || isRecording
-              ? inputBorderFocus
-              : `${inputBg} ${inputBorder}`
+              ? `${inputBg} border-green-400/50`
+              : `${inputBg} ${isDarkMode ? 'border-white/10' : 'border-green-200/60'}`
           )}
         >
           <textarea
@@ -244,7 +238,7 @@ export function ChatInput({
             disabled={disabled}
             rows={1}
             className={cn(
-              'flex-1 resize-none bg-transparent text-sm focus:outline-none border-none py-3 pl-3 sm:pl-4 max-h-[120px] leading-relaxed',
+              'flex-1 resize-none bg-transparent text-sm outline-none border-none ring-0 focus:outline-none focus:border-none focus:ring-0 py-3 pl-3 sm:pl-4 max-h-[120px] leading-relaxed',
               textColor,
               placeholderColor
             )}

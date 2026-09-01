@@ -453,10 +453,9 @@ export function ThreadNav() {
 
           {/* Search */}
           <div className="px-3 pb-1">
-            <div className={cn('flex items-center gap-2 px-3 py-2 rounded-lg border transition-all focus-within:border-green-400', isDarkMode ? 'bg-white/[0.03] border-white/10' : 'bg-white border-gray-200')}>
+            <div className={cn('flex items-center gap-2 px-3 py-2 rounded-lg border transition-all', isDarkMode ? 'bg-white/[0.03] border-green-500/30' : 'bg-white border-green-300/60')}>
               <Search className={cn('w-3.5 h-3.5 shrink-0', isDarkMode ? 'text-white/30' : 'text-gray-400')} />
-              <input ref={searchInputRef} type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search..." className={cn('flex-1 bg-transparent text-xs focus:outline-none border-none min-w-0', isDarkMode ? 'text-white placeholder:text-white/30' : 'text-gray-900 placeholder:text-gray-400')} />
-              {!searchQuery && <kbd className={cn('text-[9px] font-mono px-1 py-0.5 rounded border hidden sm:inline', isDarkMode ? 'border-white/10 text-white/20' : 'border-gray-200 text-gray-300')}>Ctrl+K</kbd>}
+              <input ref={searchInputRef} type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search conversations..." className={cn('flex-1 bg-transparent text-xs outline-none border-none ring-0 focus:outline-none focus:border-none focus:ring-0 min-w-0', isDarkMode ? 'text-white placeholder:text-white/30' : 'text-gray-900 placeholder:text-gray-400')} />
               {searchQuery && (
                 <button onClick={() => { setSearchQuery(''); searchInputRef.current?.focus(); }} className={cn('p-0.5 rounded transition-colors shrink-0', isDarkMode ? 'hover:bg-white/10 text-white/30' : 'hover:bg-gray-200 text-gray-400')}>
                   <X className="w-3 h-3" />

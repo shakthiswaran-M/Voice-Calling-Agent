@@ -89,7 +89,7 @@ export function MessageSearch({ isOpen, onClose, messages, onNavigateToMessage, 
         onKeyDown={handleKeyDown}
         placeholder="Search conversation..."
         className={cn(
-          'flex-1 bg-transparent text-xs focus:outline-none min-w-0',
+          'flex-1 bg-transparent text-xs outline-none border-none ring-0 focus:outline-none focus:border-none focus:ring-0 min-w-0',
           isDarkMode ? 'text-white placeholder:text-white/30' : 'text-gray-900 placeholder:text-gray-400'
         )}
       />
