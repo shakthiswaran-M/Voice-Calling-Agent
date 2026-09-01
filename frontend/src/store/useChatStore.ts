@@ -28,6 +28,7 @@ export const useChatStore = create<ChatStore>()(
       isSidebarOpen: true,
       editingThreadId: null,
       isDarkMode: false,
+      scrollPositions: {},
 
       createThread: () => {
         const newThread: Thread = {
@@ -47,8 +48,10 @@ export const useChatStore = create<ChatStore>()(
       deleteThread: (threadId: string) => {
         set((state) => {
           const newThreads = state.threads.filter((t) => t.id !== threadId);
+          const { [threadId]: _removed, ...restPositions } = state.scrollPositions;
           return {
             threads: newThreads,
+            scrollPositions: restPositions,
             activeThreadId: state.activeThreadId === threadId
               ? newThreads.length > 0 ? newThreads[0].id : null
               : state.activeThreadId,
@@ -113,6 +116,22 @@ export const useChatStore = create<ChatStore>()(
       setSidebarOpen: (open: boolean) => set({ isSidebarOpen: open }),
       setEditingThread: (threadId: string | null) => set({ editingThreadId: threadId }),
       toggleDarkMode: () => set((state) => ({ isDarkMode: !state.isDarkMode })),
+
+      saveScrollPosition: (threadId: string, messageId: string, offset: number) => {
+        set((state) => ({
+          scrollPositions: {
+            ...state.scrollPositions,
+            [threadId]: { lastVisibleMessageId: messageId, scrollOffset: offset },
+          },
+        }));
+      },
+
+      removeScrollPosition: (threadId: string) => {
+        set((state) => {
+          const { [threadId]: _removed, ...rest } = state.scrollPositions;
+          return { scrollPositions: rest };
+        });
+      },
     }),
     { name: 'netkathir-chat-v2' }
   )

@@ -19,12 +19,18 @@ export type Thread = {
   pinned?: boolean;
 };
 
+export type ScrollPosition = {
+  lastVisibleMessageId: string;
+  scrollOffset: number;
+};
+
 export type ChatState = {
   threads: Thread[];
   activeThreadId: string | null;
   isSidebarOpen: boolean;
   editingThreadId: string | null;
   isDarkMode: boolean;
+  scrollPositions: Record<string, ScrollPosition>;
 };
 
 export type ChatActions = {
@@ -40,6 +46,8 @@ export type ChatActions = {
   setSidebarOpen: (open: boolean) => void;
   setEditingThread: (threadId: string | null) => void;
   toggleDarkMode: () => void;
+  saveScrollPosition: (threadId: string, messageId: string, offset: number) => void;
+  removeScrollPosition: (threadId: string) => void;
 };
 
 export type ChatStore = ChatState & ChatActions;

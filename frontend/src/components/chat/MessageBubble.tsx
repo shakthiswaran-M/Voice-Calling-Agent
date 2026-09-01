@@ -5,7 +5,7 @@ import { Message } from '../../types';
 import { formatTimestamp } from '../../store/useChatStore';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Copy, Check, User, Volume2, Square } from 'lucide-react';
+import { Copy, Check, User, Volume2, Square, Share2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import logo from '../../assets/netkathir-logo.png';
 
@@ -19,6 +19,7 @@ interface MessageBubbleProps {
   onTtsPlay?: () => void;
   onTtsPause?: () => void;
   onTtsStop?: () => void;
+  onShare?: () => void;
 }
 
 export function MessageBubble({
@@ -29,6 +30,7 @@ export function MessageBubble({
   onTtsPlay,
   onTtsPause,
   onTtsStop,
+  onShare,
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
@@ -173,6 +175,12 @@ export function MessageBubble({
                   </>
                 )}
               </>
+            )}
+            {/* Share */}
+            {onShare && (
+              <button onClick={onShare} className={actionBtn} aria-label="Share">
+                <Share2 className="w-[15px] h-[15px]" />
+              </button>
             )}
           </div>
         </div>

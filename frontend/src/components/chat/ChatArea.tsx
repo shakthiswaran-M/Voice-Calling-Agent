@@ -5,7 +5,7 @@ import { useChatStore } from '../../store/useChatStore';
 import { MessageBubble, TtsState } from './MessageBubble';
 import { ChatInput } from './ChatInput';
 import { useAutoScroll } from '../../hooks/useAutoScroll';
-import { ArrowDown, Menu } from 'lucide-react';
+import { ArrowDown, Menu, X, Check, Share2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { sendChatMessage, transcribeAudio, synthesizeSpeech, ApiError } from '../../lib/api';
 import logo from '../../assets/netkathir-logo.png';
@@ -14,10 +14,90 @@ const FALLBACK_ERROR_RESPONSE =
   "Sorry, I couldn't reach the assistant just now. Please check that the backend is running and try again.";
 
 export function ChatArea() {
-  const { threads, activeThreadId, addMessage, createThread, updateThreadTitle, setThreadSessionId, toggleSidebar, isDarkMode } = useChatStore();
+  const { threads, activeThreadId, addMessage, createThread, updateThreadTitle, setThreadSessionId, toggleSidebar, isDarkMode, saveScrollPosition, scrollPositions } = useChatStore();
   const activeThread = threads.find((t) => t.id === activeThreadId);
   const messages = activeThread?.messages || [];
-  const { containerRef, showScrollButton, handleScroll, scrollToBottom, scrollToBottomOnSend } = useAutoScroll([messages.length]);
+
+  // ── Scroll restoration state ──
+  const [restorationTarget, setRestorationTarget] = useState<{ messageId: string; offset: number } | null>(null);
+
+  const handlePositionChange = useCallback((threadId: string, messageId: string, offset: number) => {
+    saveScrollPosition(threadId, messageId, offset);
+  }, [saveScrollPosition]);
+
+  const handleRestoreComplete = useCallback(() => {
+    setRestorationTarget(null);
+  }, []);
+
+  const { containerRef, showScrollButton, isScrolledUp, handleScroll, scrollToBottom, scrollToBottomOnSend } = useAutoScroll({
+    threadId: activeThreadId,
+    messages,
+    onPositionChange: handlePositionChange,
+    restorationTarget,
+    onRestoreComplete: handleRestoreComplete,
+  });
+
+  // ── Share modal state ──
+  const [shareThreadId, setShareThreadId] = useState<string | null>(null);
+  const [copyLinkState, setCopyLinkState] = useState<'idle' | 'copied'>('idle');
+
+  const getShareUrl = useCallback((threadId: string) => {
+    return `${window.location.origin}/share/${threadId}`;
+  }, []);
+
+  const handleShareMessage = useCallback(() => {
+    if (!activeThreadId) return;
+    setShareThreadId(activeThreadId);
+    setCopyLinkState('idle');
+  }, [activeThreadId]);
+
+  const handleCopyShareLink = useCallback(async () => {
+    if (!shareThreadId) return;
+    const url = getShareUrl(shareThreadId);
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = url;
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      setCopyLinkState('copied');
+      setTimeout(() => setCopyLinkState('idle'), 2500);
+    } catch {
+      /* silently fail */
+    }
+  }, [shareThreadId, getShareUrl]);
+
+  const handleWhatsAppShare = useCallback(() => {
+    if (!shareThreadId) return;
+    const url = getShareUrl(shareThreadId);
+    const thread = threads.find(t => t.id === shareThreadId);
+    const text = thread ? `Check out this conversation: ${thread.title}\n${url}` : url;
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+  }, [shareThreadId, getShareUrl, threads]);
+
+  const closeShareModal = useCallback(() => {
+    setShareThreadId(null);
+    setCopyLinkState('idle');
+  }, []);
+
+  // Close share modal on Escape
+  useEffect(() => {
+    if (!shareThreadId) return;
+    const handleEscape = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') closeShareModal();
+    };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [shareThreadId, closeShareModal]);
+
   const [isSending, setIsSending] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
 
@@ -103,6 +183,33 @@ export function ChatArea() {
       if (audioUrlRef.current) { URL.revokeObjectURL(audioUrlRef.current); }
     };
   }, []);
+
+  // ── Thread switching: set restoration target ──
+  const prevThreadIdForRestore = useRef<string | null>(null);
+  useEffect(() => {
+    const prevId = prevThreadIdForRestore.current;
+    prevThreadIdForRestore.current = activeThreadId;
+
+    // Skip on first render or if thread didn't change
+    if (!activeThreadId || prevId === activeThreadId) return;
+
+    // Stop any playing TTS
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+      setTtsMsgId(null);
+      setTtsState('idle');
+    }
+
+    // Check for a saved scroll position for this thread
+    const saved = scrollPositions[activeThreadId];
+    if (saved) {
+      setRestorationTarget({ messageId: saved.lastVisibleMessageId, offset: saved.scrollOffset });
+    } else {
+      // No saved position → will scroll to bottom (handled in useAutoScroll)
+      setRestorationTarget(null);
+    }
+  }, [activeThreadId, scrollPositions]);
 
   // Chat handlers
 
@@ -200,7 +307,7 @@ export function ChatArea() {
                 const isBotMsg = msg.role === 'bot';
                 const msgTtsState: TtsState = ttsMsgId === msg.id ? ttsState : 'idle';
                 return (
-                  <div key={msg.id}>
+                  <div key={msg.id} data-msg-id={msg.id}>
                     {showTimeline && (
                       <div className="flex items-center gap-3 my-4 animate-fade-in">
                         <div className={cn('flex-1 h-px', isDarkMode ? 'bg-white/5' : 'bg-gray-200/60')} />
@@ -218,6 +325,7 @@ export function ChatArea() {
                       onTtsPlay={isBotMsg ? () => playTts(msg.id, msg.content) : undefined}
                       onTtsPause={isBotMsg && msgTtsState === 'playing' ? pauseTts : undefined}
                       onTtsStop={isBotMsg && msgTtsState !== 'idle' ? stopTts : undefined}
+                      onShare={isBotMsg ? handleShareMessage : undefined}
                     />
                   </div>
                 );
@@ -239,11 +347,13 @@ export function ChatArea() {
                   </div>
                 </div>
               )}
-              {showScrollButton && (
+              {isScrolledUp && (
                 <div className="flex justify-center sticky bottom-4 z-10 animate-fade-in-up">
-                  <button onClick={() => scrollToBottom(true)} className={cn('flex items-center gap-2 px-4 py-2 backdrop-blur-sm text-white rounded-full hover:shadow-lg transition-all duration-300 active:scale-95', isDarkMode ? 'bg-green-500/90 shadow-glow' : 'bg-green-600 shadow-btn')}>
+                  <button onClick={() => { setRestorationTarget(null); scrollToBottom(true); }} className={cn('flex items-center gap-2 px-4 py-2 backdrop-blur-sm text-white rounded-full shadow-lg transition-all duration-300 active:scale-95 hover:shadow-xl', isDarkMode ? 'bg-green-500/90 shadow-[0_4px_20px_rgba(34,197,94,0.3)]' : 'bg-green-600 shadow-[0_4px_20px_rgba(22,163,74,0.25)]')}>
                     <ArrowDown className="w-3.5 h-3.5" />
-                    {/* <span className="text-[11px] font-medium">New messages</span> */}
+                    {showScrollButton && (
+                      <span className="text-[11px] font-medium">New messages</span>
+                    )}
                   </button>
                 </div>
               )}
@@ -283,6 +393,79 @@ export function ChatArea() {
           </div>
         </div>
       )}
+
+      {/* Share Modal */}
+      {shareThreadId && (() => {
+        const thread = threads.find(t => t.id === shareThreadId);
+        if (!thread) return null;
+        return (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center px-4" onClick={closeShareModal}>
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-fade-in" />
+            <div
+              className={cn('relative w-full max-w-[380px] rounded-2xl border shadow-2xl animate-scale-in overflow-hidden', isDarkMode ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200')}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 pt-5 pb-3">
+                <h3 className={cn('text-sm font-semibold', isDarkMode ? 'text-white' : 'text-gray-900')}>Share conversation</h3>
+                <button onClick={closeShareModal} className={cn('p-1 rounded-lg transition-colors', isDarkMode ? 'hover:bg-white/10 text-white/40' : 'hover:bg-gray-100 text-gray-400')}>
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Description */}
+              <p className={cn('text-[11px] px-5 pb-3', isDarkMode ? 'text-white/40' : 'text-gray-500')}>Share this conversation with others</p>
+
+              {/* Thread preview */}
+              <div className="mx-5 mb-4">
+                <div className={cn('px-4 py-3 rounded-xl border text-[12px] font-medium', isDarkMode ? 'bg-white/[0.03] border-white/10 text-white/70' : 'bg-gray-50 border-gray-200 text-gray-600')}>
+                  {thread.title}
+                </div>
+              </div>
+
+              {/* Share actions */}
+              <div className="px-5 pb-3">
+                <div className="grid grid-cols-2 gap-3">
+                  {/* WhatsApp */}
+                  <button
+                    onClick={handleWhatsAppShare}
+                    className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-xs font-semibold text-white bg-[#25D366] hover:bg-[#20BD5C] transition-all duration-200 active:scale-[0.97] hover:shadow-lg hover:shadow-[#25D366]/20"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+                    </svg>
+                    WhatsApp
+                  </button>
+
+                  {/* Copy Link */}
+                  <button
+                    onClick={handleCopyShareLink}
+                    className={cn(
+                      'flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-xs font-semibold transition-all duration-200 active:scale-[0.97]',
+                      copyLinkState === 'copied'
+                        ? 'bg-green-500 text-white'
+                        : (isDarkMode ? 'bg-white/10 text-white hover:bg-white/15 border border-white/10' : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-200')
+                    )}
+                  >
+                    {copyLinkState === 'copied' ? (
+                      <><Check className="w-4 h-4" /> Link copied</>
+                    ) : (
+                      <><Share2 className="w-4 h-4" /> Copy link</>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Cancel */}
+              <div className="px-5 pb-5 pt-2">
+                <button onClick={closeShareModal} className={cn('w-full py-2.5 rounded-xl text-xs font-semibold transition-all active:scale-[0.97]', isDarkMode ? 'text-white/40 hover:text-white/60 hover:bg-white/5' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50')}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </main>
   );
 }
