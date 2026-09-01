@@ -428,8 +428,8 @@ export function ThreadNav() {
           {/* Header */}
           <div className="p-3 pb-2 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center bg-green-50 border border-green-200">
-                <img src={logo} alt="netKathir" className="w-6 h-6 object-contain" />
+              <div className="w-12 h-12 rounded-lg overflow-hidden flex items-center justify-center bg-green-50 border border-green-200">
+                <img src={logo} alt="netKathir" className="w-11 h-11 object-contain animate-float" />
               </div>
               <h1 className={cn('text-sm font-bold', isDarkMode ? 'text-white' : 'text-gray-900')}>NetKathir</h1>
             </div>

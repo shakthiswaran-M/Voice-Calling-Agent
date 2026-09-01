@@ -380,7 +380,7 @@ export function ChatArea() {
             <Menu className="w-5 h-5" />
           </button>
           <div className="flex-1 flex flex-col items-center justify-center px-6 min-h-0 safe-area-top">
-            <img src={logo} alt="netKathir" className="w-40 h-40 sm:w-52 sm:h-52 md:w-64 md:h-64 object-contain mb-6 sm:mb-8 drop-shadow-lg message-slide-in" />
+            <img src={logo} alt="netKathir" className="w-56 h-56 sm:w-72 sm:h-72 md:w-80 md:h-80 object-contain mb-6 sm:mb-8 drop-shadow-lg message-slide-in" />
             <h1 className={cn('font-display text-xl sm:text-2xl md:text-3xl font-bold text-center mb-2 message-slide-in', isDarkMode ? 'text-white' : 'text-midnight-900')} style={{ animationDelay: '0.1s' }}>
               How can I help you today?
             </h1>
