@@ -247,6 +247,11 @@ export function ThreadNav() {
             <div className="flex items-center gap-1.5">
               {thread.pinned && <Pin className="w-2.5 h-2.5 text-green-500 shrink-0 fill-green-500" />}
               <h3 className="text-[13px] font-medium truncate">{thread.title}</h3>
+              {(thread.unreadCount || 0) > 0 && !isActive && (
+                <span className="ml-auto shrink-0 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-green-500 text-white text-[9px] font-bold px-1">
+                  {thread.unreadCount}
+                </span>
+              )}
             </div>
           )}
         </div>

@@ -1,11 +1,11 @@
 // src/components/chat/MessageBubble.tsx
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Message } from '../../types';
 import { formatTimestamp } from '../../store/useChatStore';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Copy, Check, User, Volume2, Square, Share2 } from 'lucide-react';
+import { Copy, Check, User, Volume2, Square, Share2, Pin } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import logo from '../../assets/netkathir-logo.png';
 
@@ -20,6 +20,9 @@ interface MessageBubbleProps {
   onTtsPause?: () => void;
   onTtsStop?: () => void;
   onShare?: () => void;
+  onContextMenu?: (e: React.MouseEvent, msg: Message) => void;
+  isSelected?: boolean;
+  searchQuery?: string;
 }
 
 export function MessageBubble({
@@ -31,14 +34,33 @@ export function MessageBubble({
   onTtsPause,
   onTtsStop,
   onShare,
+  onContextMenu,
+  isSelected = false,
+  searchQuery = '',
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
 
-  const handleCopy = () => {
+  const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(message.content);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  }, [message.content]);
+
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    onContextMenu?.(e, message);
+  }, [onContextMenu, message]);
+
+  /* Highlight matching text */
+  const highlightText = (text: string, query: string): React.ReactNode => {
+    if (!query.trim()) return text;
+    const parts = text.split(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'));
+    return parts.map((part, i) =>
+      part.toLowerCase() === query.toLowerCase()
+        ? <mark key={i} className="bg-yellow-200/80 text-yellow-900 rounded px-0.5 dark:bg-yellow-500/30 dark:text-yellow-200">{part}</mark>
+        : part
+    );
   };
 
   /* ─── Markdown renderers ─── */
@@ -87,23 +109,14 @@ export function MessageBubble({
       ? "text-green-400 bg-green-500/10"
       : "text-green-600 bg-green-50"
   );
-  const ttsBtn = cn(
-    "flex items-center justify-center w-7 h-7 rounded-lg transition-all duration-150",
-    isDarkMode
-      ? "text-white/30 hover:text-white/60 hover:bg-white/[0.06]"
-      : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
-  );
-  const ttsBtnActive = cn(
-    "flex items-center justify-center w-7 h-7 rounded-lg transition-all duration-150",
-    isDarkMode
-      ? "text-green-400 bg-green-500/10"
-      : "text-green-600 bg-green-50"
-  );
+  const ttsBtn = actionBtn;
+  const ttsBtnActive = actionBtnActive;
 
   return (
     <div
       className={cn("w-full", isUser ? "flex justify-end" : "", isUser ? "msg-slide-right" : "msg-slide-left")}
       style={{ animationDelay: `${index * 0.08}s` }}
+      onContextMenu={handleContextMenu}
     >
       {isUser ? (
         <div className="max-w-[75%] md:max-w-[65%]">
@@ -112,12 +125,19 @@ export function MessageBubble({
             <span className={cn("text-[10px] font-semibold tracking-wider uppercase", isDarkMode ? "text-green-400/70" : "text-green-600")}>You</span>
             <div className="w-6 h-6 rounded-lg bg-green-500 flex items-center justify-center shadow-sm"><User className="w-3 h-3 text-white" /></div>
           </div>
-          <div className={cn("rounded-2xl rounded-tr-md px-5 py-4 transition-all duration-300 cursor-default", isDarkMode ? "bg-green-500/10 border border-green-500/20 text-white" : "bg-green-50 border border-green-200 text-midnight-900")}>
-            <p className="text-sm leading-relaxed whitespace-pre-wrap cursor-default select-text">{message.content}</p>
+          <div className={cn("rounded-2xl rounded-tr-md px-5 py-4 transition-all duration-300 cursor-default", isSelected && "ring-2 ring-green-400/50", isDarkMode ? "bg-green-500/10 border border-green-500/20 text-white" : "bg-green-50 border border-green-200 text-midnight-900")}>
+            <p className="text-sm leading-relaxed whitespace-pre-wrap cursor-default select-text">{searchQuery ? highlightText(message.content, searchQuery) : message.content}</p>
           </div>
         </div>
       ) : (
         <div className="max-w-[80%] md:max-w-[72%]">
+          {/* Pin indicator */}
+          {message.pinned && (
+            <div className={cn("flex items-center gap-1 mb-1.5 text-[10px] font-medium", isDarkMode ? "text-green-400/60" : "text-green-600/70")}>
+              <Pin className="w-3 h-3 fill-green-500 text-green-500" />
+              <span>Pinned</span>
+            </div>
+          )}
           {/* Header */}
           <div className="flex items-center gap-2 mb-2">
             <div className={cn("w-6 h-6 rounded-lg flex items-center justify-center overflow-hidden", isDarkMode ? "bg-green-500/10 border border-green-500/20" : "bg-green-50 border border-green-200")}>
@@ -128,7 +148,7 @@ export function MessageBubble({
           </div>
 
           {/* Bubble */}
-          <div className={cn("rounded-2xl rounded-tl-md px-6 py-5 transition-all duration-300", isDarkMode ? "bg-white/[0.03] border border-white/[0.06]" : "bg-white border border-green-100 shadow-card")}>
+          <div className={cn("rounded-2xl rounded-tl-md px-6 py-5 transition-all duration-300", isSelected && "ring-2 ring-green-400/50", isDarkMode ? "bg-white/[0.03] border border-white/[0.06]" : "bg-white border border-green-100 shadow-card")}>
             <div className={cn("prose-custom cursor-default select-text", isDarkMode ? "text-white/80" : "text-midnight-800")}>
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={md}>{message.content}</ReactMarkdown>
             </div>
@@ -136,12 +156,9 @@ export function MessageBubble({
 
           {/* Always-visible action bar */}
           <div className="flex items-center gap-1 mt-1.5">
-            {/* Copy */}
             <button onClick={handleCopy} className={copied ? actionBtnActive : actionBtn} aria-label="Copy message">
               {copied ? <Check className="w-[15px] h-[15px]" /> : <Copy className="w-[15px] h-[15px]" />}
             </button>
-
-            {/* TTS Play / Pause / Stop */}
             {onTtsPlay && (
               <>
                 {ttsState === 'idle' && (
@@ -176,7 +193,6 @@ export function MessageBubble({
                 )}
               </>
             )}
-            {/* Share */}
             {onShare && (
               <button onClick={onShare} className={actionBtn} aria-label="Share">
                 <Share2 className="w-[15px] h-[15px]" />

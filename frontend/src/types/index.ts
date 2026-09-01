@@ -5,6 +5,7 @@ export type Message = {
   role: 'user' | 'bot';
   content: string;
   timestamp: number;
+  pinned?: boolean;
 };
 
 export type Thread = {
@@ -17,6 +18,10 @@ export type Thread = {
   sessionId?: string;
   /** Whether this thread is pinned to the top of the list. */
   pinned?: boolean;
+  /** Number of unread messages. */
+  unreadCount?: number;
+  /** Message ID this thread is replying to. */
+  replyTo?: string | null;
 };
 
 export type ScrollPosition = {
@@ -48,6 +53,10 @@ export type ChatActions = {
   toggleDarkMode: () => void;
   saveScrollPosition: (threadId: string, messageId: string, offset: number) => void;
   removeScrollPosition: (threadId: string) => void;
+  markThreadRead: (threadId: string) => void;
+  incrementUnread: (threadId: string) => void;
+  togglePinMessage: (threadId: string, messageId: string) => void;
+  setReplyTo: (threadId: string, messageId: string | null) => void;
 };
 
 export type ChatStore = ChatState & ChatActions;

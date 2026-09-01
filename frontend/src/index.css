@@ -313,3 +313,92 @@ a, button, [role="button"] { cursor: pointer; }
   .mobile-safe-top { padding-top: env(safe-area-inset-top); }
   .mobile-safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
 }
+
+/* ================================================================
+   PRINT STYLES
+   ================================================================ */
+
+@media print {
+  /* Hide everything except the print area */
+  .chat-sidebar,
+  .chat-sidebar ~ *,
+  [aria-label="Open sidebar"],
+  [aria-label="Close sidebar"],
+  [aria-label="Open sidebar"],
+  button[aria-label],
+  nav,
+  aside,
+  .safe-area-bottom,
+  textarea,
+  .typing-dot,
+  .animate-fade-in-up,
+  .animate-fade-in,
+  .animate-scale-in,
+  [data-msg-id] button,
+  mark {
+    display: none !important;
+  }
+
+  /* Reset layout for print */
+  html, body, #root {
+    position: static !important;
+    width: auto !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  body {
+    background: white !important;
+    color: #111 !important;
+  }
+
+  .chat-main {
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .chat-main > div {
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  /* Message bubbles — clean print */
+  [data-msg-id] {
+    page-break-inside: avoid;
+    margin-bottom: 12pt;
+  }
+
+  /* Bubble styles for print */
+  .rounded-2xl {
+    border-radius: 4pt !important;
+    border: 1px solid #ddd !important;
+  }
+
+  /* Remove backgrounds */
+  * {
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  /* Print header */
+  .print-header {
+    display: block !important;
+    text-align: center;
+    padding: 20pt 0;
+    border-bottom: 2pt solid #22C55E;
+    margin-bottom: 16pt;
+  }
+
+  .print-header h1 {
+    font-size: 18pt;
+    font-weight: 700;
+    margin: 0;
+  }
+
+  .print-header p {
+    font-size: 10pt;
+    color: #666;
+    margin: 4pt 0 0;
+  }
+}
