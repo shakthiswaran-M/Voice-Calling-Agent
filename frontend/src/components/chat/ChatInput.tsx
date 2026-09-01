@@ -15,7 +15,7 @@ export function ChatInput({
   onSend,
   disabled = false,
   isCentered = false,
-  isDarkMode = true,
+  isDarkMode = false,
   onVoiceToggle,
   isRecording = false,
 }: ChatInputProps) {
@@ -25,11 +25,9 @@ export function ChatInput({
 
   const handleSend = () => {
     const textToSend = message.trim();
-
     if (textToSend && !disabled) {
       onSend(textToSend);
       setMessage('');
-
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
       }
@@ -45,29 +43,24 @@ export function ChatInput({
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setMessage(e.target.value);
-
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
       textareaRef.current.style.height = `${Math.min(
         textareaRef.current.scrollHeight,
-        140
+        120
       )}px`;
     }
   };
 
   const hasContent = message.trim().length > 0;
 
-  const inputBg = isDarkMode ? 'bg-white/3' : 'bg-white';
-  const inputBorder = isDarkMode
-    ? 'border-white/8'
-    : 'border-midnight-200/60';
-
+  const inputBg = isDarkMode ? 'bg-white/[0.03]' : 'bg-white';
+  const inputBorder = isDarkMode ? 'border-white/10' : 'border-green-200/60';
   const inputBorderFocus = isDarkMode
-    ? 'border-[#4CAF50]/40 shadow-[0_0_18px_rgba(76,175,80,0.12)] bg-white/5'
-    : 'border-[#4CAF50]/50 shadow-[0_0_18px_rgba(76,175,80,0.12)] bg-white';
+    ? 'border-green-500/40 shadow-input-focus bg-white/[0.05]'
+    : 'border-green-400 shadow-input-focus bg-white';
 
   const textColor = isDarkMode ? 'text-white' : 'text-midnight-900';
-
   const placeholderColor = isDarkMode
     ? 'placeholder:text-white/30'
     : 'placeholder:text-midnight-300';
@@ -75,20 +68,20 @@ export function ChatInput({
   const voiceButtonStyle = isRecording
     ? 'bg-red-500/20 text-red-400 shadow-[0_0_12px_rgba(239,68,68,0.25)] animate-pulse'
     : isDarkMode
-      ? 'text-white/40 hover:text-[#4CAF50] hover:bg-[#4CAF50]/10'
-      : 'text-midnight-300 hover:text-[#4CAF50] hover:bg-[#4CAF50]/10';
+      ? 'text-white/40 hover:text-green-400 hover:bg-green-500/10'
+      : 'text-midnight-300 hover:text-green-600 hover:bg-green-50';
 
   const sendButtonStyle =
     hasContent && !disabled
-      ? 'bg-[#4CAF50] text-white shadow-[0_0_14px_rgba(76,175,80,0.25)] hover:shadow-lg active:scale-95'
+      ? 'bg-green-500 text-white shadow-btn hover:shadow-btn-hover hover:bg-green-600 active:scale-90 transition-all duration-300'
       : isDarkMode
         ? 'bg-white/5 text-white/20 cursor-not-allowed'
-        : 'bg-midnight-100 text-midnight-300 cursor-not-allowed';
+        : 'bg-green-100 text-green-300 cursor-not-allowed';
 
   if (isCentered) {
     return (
       <div
-        className="w-full max-w-4xl mx-auto px-6 slide-up-enter"
+        className="w-full max-w-3xl mx-auto px-4 sm:px-6 slide-up-enter"
         style={{ animationDelay: '0.3s' }}
       >
         <div
@@ -97,30 +90,26 @@ export function ChatInput({
             isFocused || isRecording
               ? inputBorderFocus
               : `${inputBg} ${
-                  isDarkMode
-                    ? 'border-white/10'
-                    : 'border-midnight-200/60'
+                  isDarkMode ? 'border-white/10' : 'border-green-200/60'
                 }`
           )}
         >
           {isRecording && (
             <div
               className={cn(
-                'absolute -top-9 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-1.5 rounded-full',
+                'absolute -top-9 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-1.5 rounded-full animate-slide-down',
                 isDarkMode
-                  ? 'bg-[#4CAF50]/10 border border-[#4CAF50]/20'
+                  ? 'bg-green-500/10 border border-green-500/20'
                   : 'bg-green-50 border border-green-200'
               )}
             >
-              <span className="w-2 h-2 rounded-full bg-[#4CAF50] animate-pulse" />
-
-              <span className="text-[11px] text-[#4CAF50] font-medium">
+              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+              <span className="text-[11px] text-green-500 font-medium">
                 Listening...
               </span>
-
               <button
                 onClick={onVoiceToggle}
-                className="text-[#4CAF50]/60 hover:text-[#4CAF50] ml-1"
+                className="text-green-500/60 hover:text-green-500 ml-1 transition-colors"
                 aria-label="Stop recording"
               >
                 <MicOff className="w-3 h-3" />
@@ -139,19 +128,19 @@ export function ChatInput({
             disabled={disabled}
             rows={1}
             className={cn(
-              'w-full resize-none bg-transparent text-base focus:outline-none border-none px-6 py-5 pr-24 max-h-[140px] leading-relaxed font-light',
+              'w-full resize-none bg-transparent text-sm sm:text-base focus:outline-none border-none px-4 sm:px-6 py-4 sm:py-5 pr-20 sm:pr-24 max-h-[120px] leading-relaxed font-light',
               textColor,
               placeholderColor
             )}
           />
 
-          <div className="absolute right-3 bottom-3 flex items-center gap-1.5">
+          <div className="absolute right-2 sm:right-3 bottom-2 sm:bottom-3 flex items-center gap-1 sm:gap-1.5">
             <button
               onClick={onVoiceToggle}
               disabled={disabled}
               aria-label={isRecording ? 'Stop recording' : 'Start voice input'}
               className={cn(
-                'p-2.5 rounded-xl transition-all duration-300',
+                'p-2 sm:p-2.5 rounded-xl transition-all duration-300 active:scale-90',
                 voiceButtonStyle,
                 disabled && 'opacity-40 cursor-not-allowed'
               )}
@@ -168,7 +157,7 @@ export function ChatInput({
               disabled={!hasContent || disabled}
               aria-label="Send message"
               className={cn(
-                'p-2 rounded-xl shrink-0 transition-all duration-300',
+                'p-2 sm:p-2 rounded-xl shrink-0 transition-all duration-300',
                 sendButtonStyle
               )}
             >
@@ -179,15 +168,15 @@ export function ChatInput({
 
         <p
           className={cn(
-            'text-[10px] mt-3 text-center',
+            'text-[10px] mt-2.5 text-center hidden sm:block',
             isDarkMode ? 'text-white/20' : 'text-midnight-300'
           )}
         >
           Press{' '}
           <kbd
             className={cn(
-              'px-1 py-0.5 rounded text-[9px] font-mono',
-              isDarkMode ? 'bg-white/5' : 'bg-midnight-100'
+              'px-1.5 py-0.5 rounded-md text-[9px] font-mono',
+              isDarkMode ? 'bg-white/5 text-white/30' : 'bg-green-100/50 text-green-700/50'
             )}
           >
             Enter
@@ -203,11 +192,11 @@ export function ChatInput({
       className={cn(
         'border-t backdrop-blur-md',
         isDarkMode
-          ? 'border-white/5 bg-[#0A1628]/80'
-          : 'border-midnight-100/50 bg-white/80'
+          ? 'border-green-500/10 bg-[#050F0A]/80'
+          : 'border-green-100 bg-white/80'
       )}
     >
-      <div className="max-w-5xl mx-auto px-6 py-4">
+      <div className="max-w-4xl mx-auto px-3 sm:px-6 py-3 sm:py-4">
         <div
           className={cn(
             'flex items-center gap-1 rounded-2xl border transition-all duration-300 pr-1',
@@ -229,7 +218,7 @@ export function ChatInput({
             disabled={disabled}
             rows={1}
             className={cn(
-              'flex-1 resize-none bg-transparent text-sm focus:outline-none border-none py-3 pl-4 max-h-[140px] leading-relaxed',
+              'flex-1 resize-none bg-transparent text-sm focus:outline-none border-none py-3 pl-3 sm:pl-4 max-h-[120px] leading-relaxed',
               textColor,
               placeholderColor
             )}
@@ -242,7 +231,7 @@ export function ChatInput({
               isRecording ? 'Stop recording' : 'Start voice input'
             }
             className={cn(
-              'p-2.5 rounded-xl transition-all duration-300',
+              'p-2 sm:p-2.5 rounded-xl transition-all duration-300 active:scale-90',
               voiceButtonStyle,
               disabled && 'opacity-40 cursor-not-allowed'
             )}
@@ -269,15 +258,15 @@ export function ChatInput({
 
         <p
           className={cn(
-            'text-[10px] mt-2.5 text-center',
+            'text-[10px] mt-2 text-center hidden sm:block',
             isDarkMode ? 'text-white/20' : 'text-midnight-300'
           )}
         >
           Press{' '}
           <kbd
             className={cn(
-              'px-1 py-0.5 rounded text-[9px] font-mono',
-              isDarkMode ? 'bg-white/5' : 'bg-midnight-100'
+              'px-1.5 py-0.5 rounded-md text-[9px] font-mono',
+              isDarkMode ? 'bg-white/5 text-white/30' : 'bg-green-100/50 text-green-700/50'
             )}
           >
             Enter
@@ -285,8 +274,8 @@ export function ChatInput({
           to send,{' '}
           <kbd
             className={cn(
-              'px-1 py-0.5 rounded text-[9px] font-mono',
-              isDarkMode ? 'bg-white/5' : 'bg-midnight-100'
+              'px-1.5 py-0.5 rounded-md text-[9px] font-mono',
+              isDarkMode ? 'bg-white/5 text-white/30' : 'bg-green-100/50 text-green-700/50'
             )}
           >
             Shift+Enter

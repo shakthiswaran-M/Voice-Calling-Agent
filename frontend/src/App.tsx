@@ -10,17 +10,22 @@ function App() {
   const { isDarkMode } = useChatStore();
 
   useEffect(() => {
-    if (isDarkMode) document.documentElement.classList.add('dark');
-    else document.documentElement.classList.remove('dark');
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
   }, [isDarkMode]);
 
   return (
-    <div className={cn(
-      'flex h-screen w-full font-sans transition-colors duration-500 ease-out',
-      isDarkMode
-        ? 'bg-[#050816] text-white'
-        : 'bg-ivory-50 text-midnight-900'
-    )}>
+    <div
+      className={cn(
+        'w-full h-full flex font-sans transition-colors duration-500 ease-out',
+        isDarkMode
+          ? 'bg-[#050F0A] text-green-50'
+          : 'bg-ivory-50 text-midnight-900'
+      )}
+    >
       <ThreadNav />
       <ChatArea />
     </div>

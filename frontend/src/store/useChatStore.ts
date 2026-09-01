@@ -27,7 +27,7 @@ export const useChatStore = create<ChatStore>()(
       activeThreadId: null,
       isSidebarOpen: true,
       editingThreadId: null,
-      isDarkMode: true,
+      isDarkMode: false,
 
       createThread: () => {
         const newThread: Thread = {
@@ -60,6 +60,14 @@ export const useChatStore = create<ChatStore>()(
         set((state) => ({
           threads: state.threads.map((t) =>
             t.id === threadId ? { ...t, title, updatedAt: Date.now() } : t
+          ),
+        }));
+      },
+
+      togglePinThread: (threadId: string) => {
+        set((state) => ({
+          threads: state.threads.map((t) =>
+            t.id === threadId ? { ...t, pinned: !t.pinned } : t
           ),
         }));
       },

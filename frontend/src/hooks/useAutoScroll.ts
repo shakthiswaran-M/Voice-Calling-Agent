@@ -11,7 +11,7 @@ export function useAutoScroll(dependencies: any[] = []) {
     const container = containerRef.current;
     if (!container) return true;
     const { scrollTop, scrollHeight, clientHeight } = container;
-    const threshold = 50;
+    const threshold = 80;
     const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
     return distanceFromBottom <= threshold;
   }, []);
@@ -28,8 +28,16 @@ export function useAutoScroll(dependencies: any[] = []) {
     container.scrollTo({ top: container.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
   }, []);
 
+  // Auto-scroll to bottom when new messages arrive (if already at bottom)
   useEffect(() => {
-    if (isAtBottom) scrollToBottom(false);
+    if (isAtBottom) {
+      // Scroll, then explicitly confirm we're at bottom
+      requestAnimationFrame(() => {
+        scrollToBottom(false);
+        setIsAtBottom(true);
+        setShowScrollButton(false);
+      });
+    }
   }, [dependencies, isAtBottom, scrollToBottom]);
 
   const scrollToBottomOnSend = useCallback(() => {

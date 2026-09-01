@@ -15,6 +15,8 @@ export type Thread = {
   updatedAt: number;
   /** Backend conversation/session id (set after the first successful reply). */
   sessionId?: string;
+  /** Whether this thread is pinned to the top of the list. */
+  pinned?: boolean;
 };
 
 export type ChatState = {
@@ -29,6 +31,7 @@ export type ChatActions = {
   createThread: () => Thread;
   deleteThread: (threadId: string) => void;
   updateThreadTitle: (threadId: string, title: string) => void;
+  togglePinThread: (threadId: string) => void;
   setActiveThread: (threadId: string) => void;
   addMessage: (threadId: string, message: Omit<Message, 'id' | 'timestamp'>) => void;
   updateMessage: (threadId: string, messageId: string, content: string) => void;
