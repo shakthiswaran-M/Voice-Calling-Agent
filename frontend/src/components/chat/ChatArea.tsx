@@ -243,7 +243,7 @@ export function ChatArea() {
                 <div className="flex justify-center sticky bottom-4 z-10 animate-fade-in-up">
                   <button onClick={() => scrollToBottom(true)} className={cn('flex items-center gap-2 px-4 py-2 backdrop-blur-sm text-white rounded-full hover:shadow-lg transition-all duration-300 active:scale-95', isDarkMode ? 'bg-green-500/90 shadow-glow' : 'bg-green-600 shadow-btn')}>
                     <ArrowDown className="w-3.5 h-3.5" />
-                    <span className="text-[11px] font-medium">New messages</span>
+                    {/* <span className="text-[11px] font-medium">New messages</span> */}
                   </button>
                 </div>
               )}
