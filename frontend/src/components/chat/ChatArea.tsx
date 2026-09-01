@@ -1,11 +1,11 @@
 // src/components/chat/ChatArea.tsx
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useChatStore } from '../../store/useChatStore';
-import { MessageBubble } from './MessageBubble';
+import { MessageBubble, TtsState } from './MessageBubble';
 import { ChatInput } from './ChatInput';
 import { useAutoScroll } from '../../hooks/useAutoScroll';
-import { ArrowDown, Menu, Square } from 'lucide-react';
+import { ArrowDown, Menu } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { sendChatMessage, transcribeAudio, synthesizeSpeech, ApiError } from '../../lib/api';
 import logo from '../../assets/netkathir-logo.png';
@@ -14,16 +14,97 @@ const FALLBACK_ERROR_RESPONSE =
   "Sorry, I couldn't reach the assistant just now. Please check that the backend is running and try again.";
 
 export function ChatArea() {
-  const { threads, activeThreadId, addMessage, updateMessage, createThread, updateThreadTitle, setThreadSessionId, toggleSidebar, isDarkMode } = useChatStore();
+  const { threads, activeThreadId, addMessage, createThread, updateThreadTitle, setThreadSessionId, toggleSidebar, isDarkMode } = useChatStore();
   const activeThread = threads.find((t) => t.id === activeThreadId);
   const messages = activeThread?.messages || [];
   const { containerRef, showScrollButton, handleScroll, scrollToBottom, scrollToBottomOnSend } = useAutoScroll([messages.length]);
   const [isSending, setIsSending] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
+
+  // TTS state
+  const [ttsMsgId, setTtsMsgId] = useState<string | null>(null);
+  const [ttsState, setTtsState] = useState<TtsState>('idle');
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
-  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // TTS handlers
+
+  const stopTts = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
+    }
+    setTtsMsgId(null);
+    setTtsState('idle');
+  }, []);
+
+  const pauseTts = useCallback(() => {
+    if (audioRef.current && ttsState === 'playing') {
+      audioRef.current.pause();
+      setTtsState('paused');
+    }
+  }, [ttsState]);
+
+  const playTts = useCallback(async (msgId: string, text: string) => {
+    if (ttsMsgId === msgId && ttsState === 'paused' && audioRef.current) {
+      audioRef.current.play();
+      setTtsState('playing');
+      return;
+    }
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
+    }
+    try {
+      const audioBlob = await synthesizeSpeech(text);
+      const url = URL.createObjectURL(audioBlob);
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audioUrlRef.current = url;
+      setTtsMsgId(msgId);
+      setTtsState('playing');
+      audio.onended = () => {
+        setTtsMsgId(null);
+        setTtsState('idle');
+        audioRef.current = null;
+        URL.revokeObjectURL(url);
+        audioUrlRef.current = null;
+      };
+      audio.onerror = () => {
+        setTtsMsgId(null);
+        setTtsState('idle');
+        audioRef.current = null;
+        URL.revokeObjectURL(url);
+        audioUrlRef.current = null;
+      };
+      await audio.play();
+    } catch (err) {
+      console.error('TTS failed:', err);
+      setTtsMsgId(null);
+      setTtsState('idle');
+    }
+  }, [ttsMsgId, ttsState]);
+
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+      if (audioUrlRef.current) { URL.revokeObjectURL(audioUrlRef.current); }
+    };
+  }, []);
+
+  // Chat handlers
 
   const handleSendMessage = async (content: string) => {
     const threadId = activeThreadId || createThread().id;
@@ -34,7 +115,6 @@ export function ChatArea() {
     }
     addMessage(threadId, { role: 'user', content });
     scrollToBottomOnSend();
-
     setIsSending(true);
     try {
       const { reply, session_id } = await sendChatMessage(content, thread?.sessionId);
@@ -49,23 +129,15 @@ export function ChatArea() {
   };
 
   const handleStartConversation = async () => {
-    if (isRecording) {
-      mediaRecorderRef.current?.stop();
-      setIsRecording(false);
-      return;
-    }
-
+    if (isRecording) { mediaRecorderRef.current?.stop(); setIsRecording(false); return; }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
       audioChunksRef.current = [];
-
       recorder.ondataavailable = (e) => audioChunksRef.current.push(e.data);
-
       recorder.onstop = async () => {
         stream.getTracks().forEach((track) => track.stop());
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-
         const threadId = activeThreadId || createThread().id;
         setIsSending(true);
         try {
@@ -75,26 +147,11 @@ export function ChatArea() {
             return;
           }
           addMessage(threadId, { role: 'user', content: transcript });
-
           const thread = useChatStore.getState().threads.find((t) => t.id === threadId);
           const { reply, session_id } = await sendChatMessage(transcript, thread?.sessionId);
           if (!thread?.sessionId) setThreadSessionId(threadId, session_id);
           addMessage(threadId, { role: 'bot', content: reply || '(no response)' });
-
-          const audioReply = await synthesizeSpeech(reply);
-          const audioUrl = URL.createObjectURL(audioReply);
-          const audio = new Audio(audioUrl);
-          currentAudioRef.current = audio;
-          setIsSpeaking(true);
-          audio.onended = () => {
-            setIsSpeaking(false);
-            currentAudioRef.current = null;
-            URL.revokeObjectURL(audioUrl);
-          };
-          audio.play().catch(() => {
-            setIsSpeaking(false);
-            currentAudioRef.current = null;
-          });
+          playTts(threadId, reply || '(no response)');
         } catch (err) {
           const message = err instanceof ApiError ? err.message : FALLBACK_ERROR_RESPONSE;
           addMessage(threadId, { role: 'bot', content: message });
@@ -102,7 +159,6 @@ export function ChatArea() {
           setIsSending(false);
         }
       };
-
       mediaRecorderRef.current = recorder;
       recorder.start();
       setIsRecording(true);
@@ -115,50 +171,12 @@ export function ChatArea() {
     if (!activeThreadId && threads.length === 0) createThread();
   }, [activeThreadId, threads.length, createThread]);
 
-  // Cleanup audio on unmount
-  useEffect(() => {
-    return () => {
-      if (currentAudioRef.current) {
-        currentAudioRef.current.pause();
-        currentAudioRef.current = null;
-      }
-    };
-  }, []);
-
-  const handleRegenerate = async (messageId: string) => {
-    if (!activeThreadId || !activeThread) return;
-    const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user');
-    if (!lastUserMessage) return;
-
-    setIsSending(true);
-    try {
-      const { reply, session_id } = await sendChatMessage(lastUserMessage.content, activeThread.sessionId);
-      if (!activeThread.sessionId) setThreadSessionId(activeThreadId, session_id);
-      updateMessage(activeThreadId, messageId, reply || '(no response)');
-    } catch (err) {
-      const message = err instanceof ApiError ? err.message : FALLBACK_ERROR_RESPONSE;
-      updateMessage(activeThreadId, messageId, message);
-    } finally {
-      setIsSending(false);
-    }
-  };
-
-  const stopSpeaking = () => {
-    if (currentAudioRef.current) {
-      currentAudioRef.current.pause();
-      currentAudioRef.current.currentTime = 0;
-      setIsSpeaking(false);
-      currentAudioRef.current = null;
-    }
-  };
-
   const hasMessages = messages.length > 0;
 
   return (
     <main className="chat-main">
       {hasMessages ? (
         <>
-          {/* Mobile Header */}
           <div className={cn('flex items-center gap-3 px-4 py-3 border-b shrink-0 safe-area-top', isDarkMode ? 'border-green-500/10' : 'border-green-100')}>
             <button onClick={toggleSidebar} className={cn('p-2 -ml-1 rounded-xl transition-all duration-200 active:scale-95', isDarkMode ? 'hover:bg-green-500/10' : 'hover:bg-green-50')} aria-label="Open sidebar">
               <Menu className={cn('w-5 h-5', isDarkMode ? 'text-green-300/60' : 'text-green-600')} />
@@ -166,26 +184,44 @@ export function ChatArea() {
             <span className={cn('font-display text-sm font-semibold truncate', isDarkMode ? 'text-white' : 'text-midnight-900')}>{activeThread?.title}</span>
           </div>
 
-          {/* Scrollable messages */}
           <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto min-h-0 overscroll-contain">
             <div className="max-w-4xl w-full mx-auto px-4 sm:px-6 md:px-8 py-6 sm:py-10 space-y-6 sm:space-y-8">
               <div className="text-center mb-6 sm:mb-8 message-slide-in">
                 <h2 className={cn('font-display text-xl sm:text-2xl md:text-3xl font-bold tracking-tight', isDarkMode ? 'text-white' : 'text-midnight-900')}>{activeThread?.title}</h2>
                 <div className="editorial-rule w-12 sm:w-16 mx-auto mt-3 sm:mt-4" />
               </div>
-              {messages.map((msg, i) => (
-                <MessageBubble
-                  key={msg.id}
-                  message={msg}
-                  index={i}
-                  isDarkMode={isDarkMode}
-                  onRegenerate={
-                    activeThreadId && msg.role === 'bot' && i === messages.length - 1 && !isSending
-                      ? () => handleRegenerate(msg.id)
-                      : undefined
-                  }
-                />
-              ))}
+              {messages.map((msg, i) => {
+                const prevMsg = i > 0 ? messages[i - 1] : null;
+                const showTimeline = !prevMsg || (msg.timestamp - prevMsg.timestamp > 5 * 60 * 1000);
+                const timelineDate = new Date(msg.timestamp);
+                const timeStr = timelineDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const dateStr = timelineDate.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+                const isSameDay = prevMsg && new Date(prevMsg.timestamp).toDateString() === timelineDate.toDateString();
+                const isBotMsg = msg.role === 'bot';
+                const msgTtsState: TtsState = ttsMsgId === msg.id ? ttsState : 'idle';
+                return (
+                  <div key={msg.id}>
+                    {showTimeline && (
+                      <div className="flex items-center gap-3 my-4 animate-fade-in">
+                        <div className={cn('flex-1 h-px', isDarkMode ? 'bg-white/5' : 'bg-gray-200/60')} />
+                        <span className={cn('text-[10px] font-medium whitespace-nowrap px-2 py-0.5 rounded-full', isDarkMode ? 'text-white/25 bg-white/5' : 'text-gray-400 bg-gray-100')}>
+                          {isSameDay ? timeStr : dateStr + ' \u00b7 ' + timeStr}
+                        </span>
+                        <div className={cn('flex-1 h-px', isDarkMode ? 'bg-white/5' : 'bg-gray-200/60')} />
+                      </div>
+                    )}
+                    <MessageBubble
+                      message={msg}
+                      index={i}
+                      isDarkMode={isDarkMode}
+                      ttsState={msgTtsState}
+                      onTtsPlay={isBotMsg ? () => playTts(msg.id, msg.content) : undefined}
+                      onTtsPause={isBotMsg && msgTtsState === 'playing' ? pauseTts : undefined}
+                      onTtsStop={isBotMsg && msgTtsState !== 'idle' ? stopTts : undefined}
+                    />
+                  </div>
+                );
+              })}
               {isSending && (
                 <div className="w-full msg-slide-left">
                   <div className="max-w-[85%] md:max-w-[72%]">
@@ -203,19 +239,11 @@ export function ChatArea() {
                   </div>
                 </div>
               )}
-              {isSpeaking && (
-                <div className="flex justify-center sticky bottom-4 z-10 animate-slide-up">
-                  <button onClick={stopSpeaking} className={cn('flex items-center gap-2 px-4 py-2.5 backdrop-blur-sm text-white rounded-full hover:shadow-lg transition-all duration-300 active:scale-95', isDarkMode ? 'bg-red-500/90 shadow-[0_0_20px_rgba(239,68,68,0.3)]' : 'bg-red-500 shadow-[0_4px_16px_rgba(239,68,68,0.3)]')}>
-                    <Square className="w-3 h-3 fill-white" />
-                    <span className="text-[11px] font-medium">Stop speaking</span>
-                  </button>
-                </div>
-              )}
               {showScrollButton && (
                 <div className="flex justify-center sticky bottom-4 z-10 animate-fade-in-up">
                   <button onClick={() => scrollToBottom(true)} className={cn('flex items-center gap-2 px-4 py-2 backdrop-blur-sm text-white rounded-full hover:shadow-lg transition-all duration-300 active:scale-95', isDarkMode ? 'bg-green-500/90 shadow-glow' : 'bg-green-600 shadow-btn')}>
                     <ArrowDown className="w-3.5 h-3.5" />
-                    <span className="text-[11px] font-medium">New messages</span>
+                    {/* <span className="text-[11px] font-medium">New messages</span> */}
                   </button>
                 </div>
               )}
@@ -226,9 +254,7 @@ export function ChatArea() {
           </div>
         </>
       ) : (
-        /* ═══ WELCOME ═══ */
         <div className="flex-1 flex flex-col min-h-0 relative">
-          {/* Floating menu button — always visible on mobile */}
           <button
             onClick={toggleSidebar}
             className={cn(
@@ -243,9 +269,8 @@ export function ChatArea() {
           >
             <Menu className="w-5 h-5" />
           </button>
-
           <div className="flex-1 flex flex-col items-center justify-center px-6 min-h-0 safe-area-top">
-            <img src={logo} alt="netKathir" className="w-32 h-32 sm:w-40 sm:h-40 md:w-48 md:h-48 object-contain mb-4 sm:mb-6 message-slide-in" />
+            <img src={logo} alt="netKathir" className="w-40 h-40 sm:w-52 sm:h-52 md:w-64 md:h-64 object-contain mb-6 sm:mb-8 drop-shadow-lg message-slide-in" />
             <h1 className={cn('font-display text-xl sm:text-2xl md:text-3xl font-bold text-center mb-2 message-slide-in', isDarkMode ? 'text-white' : 'text-midnight-900')} style={{ animationDelay: '0.1s' }}>
               How can I help you today?
             </h1>
@@ -253,7 +278,6 @@ export function ChatArea() {
               Type a message or tap the mic to talk
             </p>
           </div>
-
           <div className="shrink-0 safe-area-bottom">
             <ChatInput onSend={handleSendMessage} disabled={!activeThreadId || isSending} isCentered isDarkMode={isDarkMode} onVoiceToggle={handleStartConversation} isRecording={isRecording} />
           </div>
@@ -261,4 +285,4 @@ export function ChatArea() {
       )}
     </main>
   );
-}
+}
