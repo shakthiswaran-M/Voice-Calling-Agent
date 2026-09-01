@@ -1,4 +1,3 @@
-
 from uuid import uuid4
 import re
 import logging
@@ -15,8 +14,10 @@ from app.agent.tools import AVAILABLE_TOOLS, TOOL_SCHEMAS
 from app.config import settings
 from app.database import database
 
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
 
 client = AsyncOpenAI(
     api_key=settings.llm_api_key,
@@ -24,26 +25,74 @@ client = AsyncOpenAI(
 )
 
 
+# ============================================================
+# RESPONSE CLEANING
+# ============================================================
+
 def clean_response(text: str) -> str:
-    """Remove Markdown formatting from the LLM response."""
+    """
+    Remove Markdown formatting and unwanted symbols
+    from the LLM response for clean text and voice output.
+    """
 
     if not text:
         return ""
 
+    # Remove bold Markdown
     text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)
-    text = re.sub(r"\*(.*?)\*", r"\1", text)
-    text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)
-    text = re.sub(r"^\s*[-*+]\s+", "", text, flags=re.MULTILINE)
-    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
 
+    # Remove italic Markdown
+    text = re.sub(r"\*(.*?)\*", r"\1", text)
+
+    # Remove headings
+    text = re.sub(
+        r"^#{1,6}\s*",
+        "",
+        text,
+        flags=re.MULTILINE,
+    )
+
+    # Remove Markdown bullet points
+    text = re.sub(
+        r"^\s*[-*+]\s+",
+        "",
+        text,
+        flags=re.MULTILINE,
+    )
+
+    # Remove Markdown links but keep link text
+    text = re.sub(
+        r"\[([^\]]+)\]\([^)]+\)",
+        r"\1",
+        text,
+    )
+
+    # Remove remaining asterisk characters
     text = text.replace("*", "")
+
+    # Remove backticks
     text = text.replace("`", "")
 
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
+    # Normalize spaces
+    text = re.sub(
+        r"[ \t]+",
+        " ",
+        text,
+    )
+
+    # Avoid excessive blank lines
+    text = re.sub(
+        r"\n{3,}",
+        "\n\n",
+        text,
+    )
 
     return text.strip()
 
+
+# ============================================================
+# REQUEST / RESPONSE MODELS
+# ============================================================
 
 class ChatRequest(BaseModel):
     message: str
@@ -55,12 +104,23 @@ class ChatResponse(BaseModel):
     session_id: str
 
 
+# ============================================================
+# IN-MEMORY CONVERSATION CONTEXT
+# ============================================================
+
 conversation_history: dict[str, list[dict[str, str]]] = {}
 
 conversation_context: dict[str, dict] = {}
 
 
-def update_context(session_id: str, message: str) -> dict:
+# ============================================================
+# CONTEXT MANAGEMENT
+# ============================================================
+
+def update_context(
+    session_id: str,
+    message: str,
+) -> dict:
     """
     Extract important information from the user's message
     and store it for the current conversation session.
@@ -92,14 +152,24 @@ def update_context(session_id: str, message: str) -> dict:
     ]
 
     for pattern in name_patterns:
-        match = re.search(pattern, message, re.IGNORECASE)
+        match = re.search(
+            pattern,
+            message,
+            re.IGNORECASE,
+        )
 
         if match:
-            context["customer"]["name"] = match.group(1).strip().title()
+            context["customer"]["name"] = (
+                match.group(1)
+                .strip()
+                .title()
+            )
             break
 
     if len(message.strip()) > 3:
-        important_facts = context["conversation"]["important_facts"]
+        important_facts = (
+            context["conversation"]["important_facts"]
+        )
 
         if message not in important_facts:
             important_facts.append(message)
@@ -107,7 +177,13 @@ def update_context(session_id: str, message: str) -> dict:
     return context
 
 
-def build_context_message(session_id: str) -> str:
+# ============================================================
+# BUILD CONTEXT MESSAGE
+# ============================================================
+
+def build_context_message(
+    session_id: str,
+) -> str:
     """
     Converts stored context into information that can be
     supplied to the LLM.
@@ -158,22 +234,57 @@ def build_context_message(session_id: str) -> str:
     )
 
 
-@router.post("/api/chat", response_model=ChatResponse)
+# ============================================================
+# CHAT ENDPOINT
+# ============================================================
+
+@router.post(
+    "/api/chat",
+    response_model=ChatResponse,
+)
 async def chat(req: ChatRequest):
+
+    # --------------------------------------------------------
+    # Create session
+    # --------------------------------------------------------
 
     session_id = req.session_id or str(uuid4())
 
     await database.ensure_conversation(session_id)
 
+    # --------------------------------------------------------
+    # Remove conversations older than 30 days
+    # --------------------------------------------------------
+
+    await database.cleanup_old_conversations()
+
+    # --------------------------------------------------------
+    # Create in-memory history if needed
+    # --------------------------------------------------------
+
     if session_id not in conversation_history:
         conversation_history[session_id] = []
+
+    # --------------------------------------------------------
+    # Update context
+    # --------------------------------------------------------
 
     update_context(
         session_id=session_id,
         message=req.message,
     )
 
-    context_message = build_context_message(session_id)
+    # --------------------------------------------------------
+    # Build context
+    # --------------------------------------------------------
+
+    context_message = build_context_message(
+        session_id
+    )
+
+    # --------------------------------------------------------
+    # Build messages for LLM
+    # --------------------------------------------------------
 
     messages = [
         {
@@ -181,10 +292,15 @@ async def chat(req: ChatRequest):
             "content": (
                 f"{SYSTEM_PROMPT}\n\n"
                 f"{AGENT_INSTRUCTIONS}\n\n"
-                f"Business information:\n{BUSINESS_INFO}"
+                f"Business information:\n"
+                f"{BUSINESS_INFO}"
             ),
         }
     ]
+
+    # --------------------------------------------------------
+    # Add conversation context
+    # --------------------------------------------------------
 
     if context_message:
         messages.append(
@@ -194,9 +310,17 @@ async def chat(req: ChatRequest):
             }
         )
 
+    # --------------------------------------------------------
+    # Add previous conversation history
+    # --------------------------------------------------------
+
     messages.extend(
         conversation_history[session_id]
     )
+
+    # --------------------------------------------------------
+    # Add current user message
+    # --------------------------------------------------------
 
     messages.append(
         {
@@ -205,47 +329,86 @@ async def chat(req: ChatRequest):
         }
     )
 
-    current_turn = [messages[-1]]
+    current_turn = [
+        messages[-1]
+    ]
+
+    # ========================================================
+    # CALL LLM
+    # ========================================================
 
     try:
+
         for _ in range(3):
 
-            completion = await client.chat.completions.create(
-                model=settings.llm_model,
-                messages=messages,
-                tools=TOOL_SCHEMAS,
-                tool_choice="auto",
+            completion = (
+                await client.chat.completions.create(
+                    model=settings.llm_model,
+                    messages=messages,
+                    tools=TOOL_SCHEMAS,
+                    tool_choice="auto",
+                )
             )
 
-            assistant_message = completion.choices[0].message
-
-            tool_calls = assistant_message.tool_calls or []
-
-            assistant_data = assistant_message.model_dump(
-                exclude_none=True
+            assistant_message = (
+                completion.choices[0].message
             )
 
-            messages.append(assistant_data)
-            current_turn.append(assistant_data)
+            tool_calls = (
+                assistant_message.tool_calls or []
+            )
+
+            assistant_data = (
+                assistant_message.model_dump(
+                    exclude_none=True
+                )
+            )
+
+            messages.append(
+                assistant_data
+            )
+
+            current_turn.append(
+                assistant_data
+            )
+
+            # ------------------------------------------------
+            # Normal response
+            # ------------------------------------------------
 
             if not tool_calls:
-                reply = assistant_message.content or ""
+
+                reply = (
+                    assistant_message.content or ""
+                )
+
                 break
+
+            # ------------------------------------------------
+            # Tool calls
+            # ------------------------------------------------
 
             for tool_call in tool_calls:
 
-                tool_name = tool_call.function.name
+                tool_name = (
+                    tool_call.function.name
+                )
 
-                tool = AVAILABLE_TOOLS.get(tool_name)
+                tool = AVAILABLE_TOOLS.get(
+                    tool_name
+                )
 
                 if tool is None:
                     raise ValueError(
-                        f"Unknown tool requested: {tool_name}"
+                        f"Unknown tool requested: "
+                        f"{tool_name}"
                     )
 
                 try:
+
                     arguments = json.loads(
-                        tool_call.function.arguments or "{}"
+                        tool_call.function.arguments
+                        or "{}"
                     )
 
                     result = tool(**arguments)
@@ -256,10 +419,14 @@ async def chat(req: ChatRequest):
                 except (
                     TypeError,
                     ValueError,
-                    json.JSONDecodeError
+                    json.JSONDecodeError,
                 ) as exc:
+
                     result = {
-                        "error": f"Tool could not be executed: {exc}"
+                        "error": (
+                            "Tool could not be executed: "
+                            f"{exc}"
+                        )
                     }
 
                 tool_message = {
@@ -269,21 +436,36 @@ async def chat(req: ChatRequest):
                     "content": json.dumps(result),
                 }
 
-                messages.append(tool_message)
-                current_turn.append(tool_message)
+                messages.append(
+                    tool_message
+                )
+
+                current_turn.append(
+                    tool_message
+                )
+
+        # ----------------------------------------------------
+        # Fallback after maximum tool-call attempts
+        # ----------------------------------------------------
 
         else:
 
-            completion = await client.chat.completions.create(
-                model=settings.llm_model,
-                messages=messages,
-                tools=TOOL_SCHEMAS,
-                tool_choice="none",
+            completion = (
+                await client.chat.completions.create(
+                    model=settings.llm_model,
+                    messages=messages,
+                    tools=TOOL_SCHEMAS,
+                    tool_choice="none",
+                )
             )
 
-            assistant_message = completion.choices[0].message
+            assistant_message = (
+                completion.choices[0].message
+            )
 
-            reply = assistant_message.content or ""
+            reply = (
+                assistant_message.content or ""
+            )
 
             current_turn.append(
                 assistant_message.model_dump(
@@ -294,8 +476,9 @@ async def chat(req: ChatRequest):
     except Exception as exc:
 
         logger.exception(
-            "LLM or tool request failed for session %s",
-            session_id
+            "LLM or tool request failed "
+            "for session %s",
+            session_id,
         )
 
         raise HTTPException(
@@ -306,12 +489,51 @@ async def chat(req: ChatRequest):
             ),
         ) from exc
 
+    # ========================================================
+    # CLEAN RESPONSE
+    # ========================================================
+
     reply = clean_response(reply)
+
+    # ========================================================
+    # SAVE MESSAGE TO DATABASE
+    # ========================================================
 
     await database.add_messages(
         session_id,
-        current_turn
+        current_turn,
     )
+
+    # ========================================================
+    # UPDATE IN-MEMORY HISTORY
+    # ========================================================
+
+    for message in current_turn:
+
+        if message.get("role") in (
+            "user",
+            "assistant",
+        ):
+
+            content = message.get(
+                "content"
+            )
+
+            if content:
+                conversation_history[
+                    session_id
+                ].append(
+                    {
+                        "role": message["role"],
+                        "content": clean_response(
+                            content
+                        ),
+                    }
+                )
+
+    # ========================================================
+    # RETURN RESPONSE
+    # ========================================================
 
     return ChatResponse(
         reply=reply,
