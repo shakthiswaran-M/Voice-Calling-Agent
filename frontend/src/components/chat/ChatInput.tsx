@@ -58,7 +58,7 @@ export function ChatInput({
 
   const hasContent = message.trim().length > 0;
 
-  const inputBg = isDarkMode ? 'bg-white/[0.03]' : 'bg-white';
+  const inputBg = isDarkMode ? 'bg-[#2f2f2f]' : 'bg-white';
 
   const textColor = isDarkMode ? 'text-white' : 'text-midnight-900';
   const placeholderColor = isDarkMode
@@ -88,8 +88,8 @@ export function ChatInput({
           className={cn(
             'relative rounded-2xl border transition-all duration-300',
             isFocused || isRecording
-              ? `${inputBg} border-green-400/50`
-              : `${inputBg} ${isDarkMode ? 'border-white/10' : 'border-green-200/60'}`
+              ? `${inputBg} ${isDarkMode ? 'border-[#424242]' : 'border-green-400/50'}`
+              : `${inputBg} ${isDarkMode ? 'border-[#424242]' : 'border-green-200/60'}`
           )}
         >
           {replyToMessage && (
@@ -200,7 +200,7 @@ export function ChatInput({
       className={cn(
         'border-t backdrop-blur-md',
         isDarkMode
-          ? 'border-green-500/10 bg-[#050F0A]/80'
+          ? 'border-[#2f2f2f] bg-[#000000]/80'
           : 'border-green-100 bg-white/80'
       )}
     >
@@ -221,8 +221,8 @@ export function ChatInput({
           className={cn(
             'flex items-center gap-1 rounded-2xl border transition-all duration-300 pr-1',
             isFocused || isRecording
-              ? `${inputBg} border-green-400/50`
-              : `${inputBg} ${isDarkMode ? 'border-white/10' : 'border-green-200/60'}`
+              ? `${inputBg} ${isDarkMode ? 'border-[#424242]' : 'border-green-400/50'}`
+              : `${inputBg} ${isDarkMode ? 'border-[#424242]' : 'border-green-200/60'}`
           )}
         >
           <textarea

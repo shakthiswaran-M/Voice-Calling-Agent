@@ -353,11 +353,11 @@ export function ChatArea() {
           </div>
 
           {/* Top bar */}
-          <div className={cn('flex items-center gap-2 px-4 py-3 border-b shrink-0 safe-area-top', isDarkMode ? 'border-green-500/10' : 'border-green-100')}>
+          <div className={cn('flex items-center gap-2 px-4 py-3 border-b shrink-0 safe-area-top', isDarkMode ? 'border-[#2f2f2f]' : 'border-green-100')}>
             <button onClick={toggleSidebar} className={cn('p-2 -ml-1 rounded-xl transition-all duration-200 active:scale-95', isDarkMode ? 'hover:bg-green-500/10' : 'hover:bg-green-50')} aria-label="Open sidebar">
               <Menu className={cn('w-5 h-5', isDarkMode ? 'text-green-300/60' : 'text-green-600')} />
             </button>
-            <span className={cn('font-display text-sm font-semibold truncate flex-1', isDarkMode ? 'text-white' : 'text-midnight-900')}>{activeThread?.title}</span>
+            <span className={cn('font-display text-sm font-semibold truncate flex-1', isDarkMode ? 'text-[#ececec]' : 'text-midnight-900')}>{activeThread?.title}</span>
             <button onClick={() => setSearchOpen(!searchOpen)} className={cn('p-2 rounded-xl transition-all duration-200', isDarkMode ? 'hover:bg-green-500/10 text-white/40' : 'hover:bg-green-50 text-gray-400')} aria-label="Search conversation">
               <Search className="w-4 h-4" />
             </button>
@@ -379,7 +379,7 @@ export function ChatArea() {
           <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto min-h-0 overscroll-contain">
             <div className="max-w-4xl w-full mx-auto px-4 sm:px-6 md:px-8 py-6 sm:py-10 space-y-6 sm:space-y-8">
               <div className="text-center mb-6 sm:mb-8 message-slide-in">
-                <h2 className={cn('font-display text-xl sm:text-2xl md:text-3xl font-bold tracking-tight', isDarkMode ? 'text-white' : 'text-midnight-900')}>{activeThread?.title}</h2>
+                <h2 className={cn('font-display text-xl sm:text-2xl md:text-3xl font-bold tracking-tight', isDarkMode ? 'text-[#ececec]' : 'text-midnight-900')}>{activeThread?.title}</h2>
                 <div className="editorial-rule w-12 sm:w-16 mx-auto mt-3 sm:mt-4" />
               </div>
               {messages.map((msg, i) => {
@@ -478,7 +478,7 @@ export function ChatArea() {
           </button>
           <div className="flex-1 flex flex-col items-center justify-center px-6 min-h-0 safe-area-top">
             <img src={logo} alt="netKathir" className="w-56 h-56 sm:w-72 sm:h-72 md:w-80 md:h-80 object-contain mb-6 sm:mb-8 drop-shadow-lg message-slide-in" />
-            <h1 className={cn('font-display text-xl sm:text-2xl md:text-3xl font-bold text-center mb-2 message-slide-in', isDarkMode ? 'text-white' : 'text-midnight-900')} style={{ animationDelay: '0.1s' }}>
+            <h1 className={cn('font-display text-xl sm:text-2xl md:text-3xl font-bold text-center mb-2 message-slide-in', isDarkMode ? 'text-[#ececec]' : 'text-midnight-900')} style={{ animationDelay: '0.1s' }}>
               How can I help you today?
             </h1>
             <p className={cn('text-xs sm:text-sm text-center message-slide-in', isDarkMode ? 'text-green-200/40' : 'text-green-700/50')} style={{ animationDelay: '0.15s' }}>
@@ -510,7 +510,7 @@ export function ChatArea() {
           <div className="fixed inset-0 z-[100] flex items-center justify-center px-4" onClick={closeShareModal}>
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-fade-in" />
             <div
-              className={cn('relative w-full max-w-[380px] rounded-2xl border shadow-2xl animate-scale-in overflow-hidden', isDarkMode ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200')}
+              className={cn('relative w-full max-w-[380px] rounded-2xl border shadow-2xl animate-scale-in overflow-hidden', isDarkMode ? 'bg-[#2f2f2f] border-[#424242]' : 'bg-white border-gray-200')}
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between px-5 pt-5 pb-3">

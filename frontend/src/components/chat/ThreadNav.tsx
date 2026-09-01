@@ -288,7 +288,7 @@ export function ThreadNav() {
               <MoreHorizontal className="w-4 h-4" />
             </button>
             {openMenuId === thread.id && (
-              <div className={cn('absolute right-0 top-full mt-1 z-50 w-48 py-1.5 rounded-xl border shadow-xl animate-scale-in origin-top-right', isDarkMode ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200')} onClick={(e) => e.stopPropagation()}>
+              <div className={cn('absolute right-0 top-full mt-1 z-50 w-48 py-1.5 rounded-xl border shadow-xl animate-scale-in origin-top-right', isDarkMode ? 'bg-[#2f2f2f] border-[#424242]' : 'bg-white border-gray-200')} onClick={(e) => e.stopPropagation()}>
                 <button onClick={(e) => handlePin(e, thread.id)} className={menuBtnClass()}><Pin className={cn('w-3.5 h-3.5 shrink-0', thread.pinned && 'fill-green-500 text-green-500')} />{thread.pinned ? 'Unpin' : 'Pin to top'}</button>
                 <button onClick={(e) => handleRename(e, thread)} className={menuBtnClass()}><Edit2 className="w-3.5 h-3.5 shrink-0" />Rename</button>
                 <button onClick={(e) => handleShare(e, thread)} className={menuBtnClass()}><Share2 className="w-3.5 h-3.5 shrink-0" />Share</button>
@@ -310,7 +310,7 @@ export function ThreadNav() {
 
   // ─── Popover panel content for pinned/recent threads ───
   const renderPopoverThreads = (items: Thread[], label: string) => (
-    <div className={cn('w-64 rounded-xl border shadow-2xl overflow-hidden animate-scale-in', isDarkMode ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200')} onMouseEnter={cancelClosePopover} onMouseLeave={scheduleClosePopover}>
+    <div className={cn('w-64 rounded-xl border shadow-2xl overflow-hidden animate-scale-in', isDarkMode ? 'bg-[#2f2f2f] border-[#424242]' : 'bg-white border-gray-200')} onMouseEnter={cancelClosePopover} onMouseLeave={scheduleClosePopover}>
       <p className={cn('text-[10px] font-semibold uppercase tracking-wider px-4 pt-3 pb-1.5', isDarkMode ? 'text-white/30' : 'text-gray-400')}>{label}</p>
       <div className="max-h-64 overflow-y-auto px-1.5 pb-1.5">
         {items.length === 0 ? (
@@ -353,7 +353,7 @@ export function ThreadNav() {
 
       {/* ═══ COLLAPSED VERTICAL BAR (desktop only, when sidebar closed) ═══ */}
       {!isSidebarOpen && (
-        <div className={cn('hidden lg:flex fixed left-0 top-0 z-[55] flex-col items-center gap-0.5 py-3 px-1 h-full w-[52px] border-r', isDarkMode ? 'bg-[#111] border-white/5' : 'bg-[#f9f9f9] border-gray-200')}>
+        <div className={cn('hidden lg:flex fixed left-0 top-0 z-[55] flex-col items-center gap-0.5 py-3 px-1 h-full w-[52px] border-r', isDarkMode ? 'bg-[#171717] border-[#2f2f2f]' : 'bg-[#f9f9f9] border-gray-200')}>
           {/* Open sidebar */}
           <button
             onClick={toggleSidebar}
@@ -361,6 +361,19 @@ export function ThreadNav() {
             aria-label="Open sidebar"
           >
             <PanelLeftOpen className="w-[18px] h-[18px]" />
+          </button>
+
+          {/* New Chat */}
+          <button
+            onClick={handleNewChat}
+            className={cn('w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-200 active:scale-95', isDarkMode ? 'hover:bg-white/10 text-white/50' : 'hover:bg-gray-200 text-gray-500')}
+            aria-label="New chat"
+          >
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="2" width="14" height="14" rx="2.5" />
+              <line x1="6" y1="9" x2="12" y2="9" />
+              <line x1="9" y1="6" x2="9" y2="12" />
+            </svg>
           </button>
 
           {/* Divider */}
@@ -429,7 +442,7 @@ export function ThreadNav() {
 
       {/* ═══ FULL SIDEBAR ═══ */}
       <aside className={cn('chat-sidebar', isSidebarOpen && 'open')}>
-        <div className={cn('flex flex-col h-full border-r', isDarkMode ? 'bg-[#171717] border-white/5' : 'bg-[#f9f9f9] border-gray-200')}>
+        <div className={cn('flex flex-col h-full border-r', isDarkMode ? 'bg-[#171717] border-[#2f2f2f]' : 'bg-[#f9f9f9] border-gray-200')}>
           {/* Header */}
           <div className="p-3 pb-2 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
@@ -453,7 +466,7 @@ export function ThreadNav() {
 
           {/* Search */}
           <div className="px-3 pb-1">
-            <div className={cn('flex items-center gap-2 px-3 py-2 rounded-lg border transition-all', isDarkMode ? 'bg-white/[0.03] border-green-500/30' : 'bg-white border-green-300/60')}>
+            <div className={cn('flex items-center gap-2 px-3 py-2 rounded-lg border transition-all', isDarkMode ? 'bg-[#2f2f2f] border-[#424242]' : 'bg-white border-green-300/60')}>
               <Search className={cn('w-3.5 h-3.5 shrink-0', isDarkMode ? 'text-white/30' : 'text-gray-400')} />
               <input ref={searchInputRef} type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search conversations..." className={cn('flex-1 bg-transparent text-xs outline-none border-none ring-0 focus:outline-none focus:border-none focus:ring-0 min-w-0', isDarkMode ? 'text-white placeholder:text-white/30' : 'text-gray-900 placeholder:text-gray-400')} />
               {searchQuery && (
@@ -505,7 +518,7 @@ export function ThreadNav() {
       {deleteConfirmId && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center px-4" onClick={cancelDelete}>
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-          <div className={cn('relative w-full max-w-[300px] rounded-2xl p-5 border shadow-2xl animate-scale-in', isDarkMode ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200')} onClick={(e) => e.stopPropagation()}>
+          <div className={cn('relative w-full max-w-[300px] rounded-2xl p-5 border shadow-2xl animate-scale-in', isDarkMode ? 'bg-[#2f2f2f] border-[#424242]' : 'bg-white border-gray-200')} onClick={(e) => e.stopPropagation()}>
             <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-3', isDarkMode ? 'bg-red-500/10' : 'bg-red-50')}>
               <AlertTriangle className="w-5 h-5 text-red-500" />
             </div>
@@ -527,7 +540,7 @@ export function ThreadNav() {
           <div className="fixed inset-0 z-[100] flex items-center justify-center px-4" onClick={closeShareModal}>
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-fade-in" />
             <div
-              className={cn('relative w-full max-w-[380px] rounded-2xl border shadow-2xl animate-scale-in overflow-hidden', isDarkMode ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200')}
+              className={cn('relative w-full max-w-[380px] rounded-2xl border shadow-2xl animate-scale-in overflow-hidden', isDarkMode ? 'bg-[#2f2f2f] border-[#424242]' : 'bg-white border-gray-200')}
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}
@@ -596,7 +609,7 @@ export function ThreadNav() {
       {/* Toast */}
       {toastMsg && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] animate-slide-up max-w-[90vw]">
-          <div className={cn('flex items-center gap-2 px-4 py-3 rounded-xl border shadow-lg backdrop-blur-md', isDarkMode ? 'bg-[#1a1a1a]/95 border-white/10 text-white' : 'bg-white/95 border-gray-200 text-gray-900')}>
+          <div className={cn('flex items-center gap-2 px-4 py-3 rounded-xl border shadow-lg backdrop-blur-md', isDarkMode ? 'bg-[#2f2f2f]/95 border-[#424242] text-[#ececec]' : 'bg-white/95 border-gray-200 text-gray-900')}>
             <CheckCircle className="w-4 h-4 text-green-500 shrink-0" />
             <span className="text-xs font-medium">{toastMsg}</span>
           </div>

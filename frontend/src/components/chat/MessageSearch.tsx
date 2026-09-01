@@ -78,7 +78,7 @@ export function MessageSearch({ isOpen, onClose, messages, onNavigateToMessage, 
   return (
     <div className={cn(
       'flex items-center gap-2 px-3 py-2 border-b shrink-0 animate-fade-in',
-      isDarkMode ? 'bg-[#0a0a0a] border-white/5' : 'bg-gray-50 border-gray-200'
+      isDarkMode ? 'bg-[#1a1a1a] border-[#2f2f2f]' : 'bg-gray-50 border-gray-200'
     )}>
       <Search className={cn('w-4 h-4 shrink-0', isDarkMode ? 'text-white/30' : 'text-gray-400')} />
       <input

@@ -53,7 +53,7 @@ export function ContextMenu({ x, y, items, onClose, isDarkMode = false }: Contex
       ref={menuRef}
       className={cn(
         'fixed z-[200] w-48 py-1.5 rounded-xl border shadow-2xl animate-scale-in',
-        isDarkMode ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'
+        isDarkMode ? 'bg-[#2f2f2f] border-[#424242]' : 'bg-white border-gray-200'
       )}
       style={{ left: x, top: y }}
     >

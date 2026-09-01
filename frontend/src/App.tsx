@@ -58,7 +58,7 @@ function App() {
       className={cn(
         'w-full h-full flex font-sans transition-colors duration-500 ease-out',
         isDarkMode
-          ? 'bg-[#050F0A] text-green-50'
+          ? 'bg-[#000000] text-[#ececec]'
           : 'bg-ivory-50 text-midnight-900'
       )}
     >

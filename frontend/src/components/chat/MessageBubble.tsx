@@ -1,6 +1,6 @@
 // src/components/chat/MessageBubble.tsx
 
-import { useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Message } from '../../types';
 import { formatTimestamp } from '../../store/useChatStore';
 import ReactMarkdown from 'react-markdown';
@@ -52,25 +52,40 @@ export function MessageBubble({
     onContextMenu?.(e, message);
   }, [onContextMenu, message]);
 
-  /* Highlight matching text */
+  /* Highlight matching text — preserves original whitespace and formatting */
   const highlightText = (text: string, query: string): React.ReactNode => {
     if (!query.trim()) return text;
-    const parts = text.split(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'));
-    return parts.map((part, i) =>
-      part.toLowerCase() === query.toLowerCase()
-        ? <mark key={i} className="bg-yellow-200/80 text-yellow-900 rounded px-0.5 dark:bg-yellow-500/30 dark:text-yellow-200">{part}</mark>
-        : part
-    );
+    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(${escaped})`, 'gi');
+    const segments = text.split(regex);
+    return segments.map((segment, i) => {
+      if (segment.toLowerCase() === query.toLowerCase()) {
+        return <mark key={i} className="bg-yellow-200/80 text-yellow-900 rounded px-0.5 dark:bg-yellow-500/30 dark:text-yellow-200">{segment}</mark>;
+      }
+      return <span key={i}>{segment}</span>;
+    });
+  };
+
+  /* Recursively highlight text inside markdown rendered children */
+  const highlightChildren = (children: React.ReactNode, query: string): React.ReactNode => {
+    if (!query.trim()) return children;
+    if (typeof children === 'string') return highlightText(children, query);
+    if (Array.isArray(children)) return children.map((child, i) => highlightChildren(child, query));
+    if (children && typeof children === 'object' && (children as React.ReactElement).props?.children) {
+      const el = children as React.ReactElement;
+      return React.cloneElement(el, { key: el.key, children: highlightChildren(el.props.children, query) });
+    }
+    return children;
   };
 
   /* ─── Markdown renderers ─── */
   const md: Record<string, any> = {
-    p: ({ children, ...p }: any) => <p className="text-sm leading-relaxed mb-3 last:mb-0" {...p}>{children}</p>,
-    strong: ({ children, ...p }: any) => <strong className="font-bold" {...p}>{children}</strong>,
-    em: ({ children, ...p }: any) => <em className="italic" {...p}>{children}</em>,
+    p: ({ children, ...p }: any) => <p className="text-sm leading-relaxed mb-3 last:mb-0" {...p}>{searchQuery ? highlightChildren(children, searchQuery) : children}</p>,
+    strong: ({ children, ...p }: any) => <strong className="font-bold" {...p}>{searchQuery ? highlightChildren(children, searchQuery) : children}</strong>,
+    em: ({ children, ...p }: any) => <em className="italic" {...p}>{searchQuery ? highlightChildren(children, searchQuery) : children}</em>,
     ul: ({ children, ...p }: any) => <ul className="list-disc list-inside mb-3 space-y-1 text-sm" {...p}>{children}</ul>,
     ol: ({ children, ...p }: any) => <ol className="list-decimal list-inside mb-3 space-y-1 text-sm" {...p}>{children}</ol>,
-    li: ({ children, ...p }: any) => <li className="leading-relaxed" {...p}>{children}</li>,
+    li: ({ children, ...p }: any) => <li className="leading-relaxed" {...p}>{searchQuery ? highlightChildren(children, searchQuery) : children}</li>,
     a: ({ href, children, ...p }: any) => (
       <a href={href} target="_blank" rel="noopener noreferrer" className={cn("underline underline-offset-2 font-medium", isDarkMode ? "text-green-400 hover:text-green-300" : "text-green-600 hover:text-green-700")} {...p}>{children}</a>
     ),
@@ -125,7 +140,7 @@ export function MessageBubble({
             <span className={cn("text-[10px] font-semibold tracking-wider uppercase", isDarkMode ? "text-green-400/70" : "text-green-600")}>You</span>
             <div className="w-6 h-6 rounded-lg bg-green-500 flex items-center justify-center shadow-sm"><User className="w-3 h-3 text-white" /></div>
           </div>
-          <div className={cn("rounded-2xl rounded-tr-md px-5 py-4 transition-all duration-300 cursor-default", isSelected && "ring-2 ring-green-400/50", isDarkMode ? "bg-green-500/10 border border-green-500/20 text-white" : "bg-green-50 border border-green-200 text-midnight-900")}>
+          <div className={cn("rounded-2xl rounded-tr-md px-5 py-4 transition-all duration-300 cursor-default", isSelected && "ring-2 ring-green-400/50", isDarkMode ? "bg-[#2f2f2f] border border-[#424242] text-[#ececec]" : "bg-green-50 border border-green-200 text-midnight-900")}>
             <p className="text-sm leading-relaxed whitespace-pre-wrap cursor-default select-text">{searchQuery ? highlightText(message.content, searchQuery) : message.content}</p>
           </div>
         </div>
@@ -140,7 +155,7 @@ export function MessageBubble({
           )}
           {/* Header */}
           <div className="flex items-center gap-2 mb-2">
-            <div className={cn("w-6 h-6 rounded-lg flex items-center justify-center overflow-hidden", isDarkMode ? "bg-green-500/10 border border-green-500/20" : "bg-green-50 border border-green-200")}>
+            <div className={cn("w-6 h-6 rounded-lg flex items-center justify-center overflow-hidden", isDarkMode ? "bg-[#2f2f2f] border border-[#424242]" : "bg-green-50 border border-green-200")}>
               <img src={logo} alt="" className="w-full h-full object-contain p-0.5" />
             </div>
             <span className={cn("text-[10px] font-semibold tracking-wider uppercase", isDarkMode ? "text-green-400/70" : "text-green-600")}>NetKathir</span>
@@ -148,7 +163,7 @@ export function MessageBubble({
           </div>
 
           {/* Bubble */}
-          <div className={cn("rounded-2xl rounded-tl-md px-6 py-5 transition-all duration-300", isSelected && "ring-2 ring-green-400/50", isDarkMode ? "bg-white/[0.03] border border-white/[0.06]" : "bg-white border border-green-100 shadow-card")}>
+          <div className={cn("rounded-2xl rounded-tl-md px-6 py-5 transition-all duration-300", isSelected && "ring-2 ring-green-400/50", isDarkMode ? "bg-[#2f2f2f] border border-[#424242]" : "bg-white border border-green-100 shadow-card")}>
             <div className={cn("prose-custom cursor-default select-text", isDarkMode ? "text-white/80" : "text-midnight-800")}>
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={md}>{message.content}</ReactMarkdown>
             </div>
