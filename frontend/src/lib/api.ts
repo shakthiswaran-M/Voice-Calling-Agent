@@ -73,3 +73,46 @@ export async function checkHealth(): Promise<boolean> {
     return false;
   }
 }
+
+/** Send recorded audio to the backend and get back the transcribed text. */
+export async function transcribeAudio(audioBlob: Blob): Promise<string> {
+  const formData = new FormData();
+  formData.append('file', audioBlob, 'recording.wav');
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}/api/stt-test`, {
+      method: 'POST',
+      body: formData,
+    });
+  } catch (err) {
+    throw new ApiError('Could not reach the backend for speech-to-text.');
+  }
+
+  if (!res.ok) {
+    throw new ApiError(`STT request failed (${res.status})`, res.status);
+  }
+
+  const data = await res.json();
+  return data.transcript as string;
+}
+
+/** Send text to the backend and get back playable speech audio. */
+export async function synthesizeSpeech(text: string): Promise<Blob> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}/api/tts-test`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+  } catch (err) {
+    throw new ApiError('Could not reach the backend for text-to-speech.');
+  }
+
+  if (!res.ok) {
+    throw new ApiError(`TTS request failed (${res.status})`, res.status);
+  }
+
+  return res.blob();
+}
