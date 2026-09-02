@@ -70,7 +70,7 @@ export function MessageBubble({
   const highlightChildren = (children: React.ReactNode, query: string): React.ReactNode => {
     if (!query.trim()) return children;
     if (typeof children === 'string') return highlightText(children, query);
-    if (Array.isArray(children)) return children.map((child, i) => highlightChildren(child, query));
+    if (Array.isArray(children)) return children.map((child) => highlightChildren(child, query));
     if (children && typeof children === 'object' && (children as React.ReactElement).props?.children) {
       const el = children as React.ReactElement;
       return React.cloneElement(el, { key: el.key, children: highlightChildren(el.props.children, query) });

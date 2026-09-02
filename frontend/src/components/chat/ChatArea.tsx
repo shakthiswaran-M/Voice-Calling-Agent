@@ -21,7 +21,7 @@ export function ChatArea() {
     threads, activeThreadId, addMessage, createThread, updateThreadTitle,
     setThreadSessionId, toggleSidebar, isDarkMode, saveScrollPosition,
     scrollPositions, markThreadRead, incrementUnread, togglePinMessage,
-    setReplyTo, updateMessage,
+    setReplyTo, 
   } = useChatStore();
   const activeThread = threads.find((t) => t.id === activeThreadId);
   const messages = activeThread?.messages || [];
