@@ -1,16 +1,16 @@
-import requests
+import httpx
 from app.config import settings
 
-STT_URL = "https://api.sarvam.ai/speech-to-text"
 
-def transcribe_audio(audio_bytes: bytes, filename: str = "audio.wav") -> str:
+async def transcribe_audio(audio_bytes: bytes, filename: str = "audio.wav") -> str:
     """Sends audio to Sarvam STT and returns the transcribed text."""
-    response = requests.post(
-        STT_URL,
-        headers={"api-subscription-key": settings.stt_api_key},
-        files={"file": (filename, audio_bytes, "audio/wav")},
-        data={"model": "saaras:v3", "language_code": "en-IN"},
-    )
-    response.raise_for_status()
-    result = response.json()
-    return result.get("transcript", "")
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            settings.stt_url,
+            headers={"api-subscription-key": settings.stt_api_key},
+            files={"file": (filename, audio_bytes, "audio/wav")},
+            data={"model": settings.stt_model, "language_code": settings.stt_language_code},
+        )
+        response.raise_for_status()
+        result = response.json()
+        return result.get("transcript", "")
