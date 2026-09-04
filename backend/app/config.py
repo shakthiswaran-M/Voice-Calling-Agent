@@ -8,18 +8,19 @@ ENV_PATH = BASE_DIR / ".env"
 class Settings(BaseSettings):
     # LLM configuration
     llm_api_key: str
-    llm_model: str = "llama-3.3-70b-versatile"
+    llm_model: str 
+    llm_base_url: str 
 
     # STT configuration
     stt_api_key: str
-    stt_url: str = "https://api.sarvam.ai/speech-to-text"
+    stt_url: str 
     stt_model: str = "saaras:v3"
     stt_language_code: str = "en-IN"
 
     # TTS configuration
     elevenlabs_api_key: str
-    elevenlabs_voice_id: str = "EXAVITQu4vr4xnSDxMaL"
-    elevenlabs_model_id: str = "eleven_multilingual_v2"
+    elevenlabs_voice_id: str 
+    elevenlabs_model_id: str
 
     # Database configuration
     database_url: str
@@ -28,7 +29,7 @@ class Settings(BaseSettings):
     conversation_retention_days: int = 30
 
     # CORS configuration
-    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    cors_origins: str 
 
     # Seeding — disabled by default; only enable locally if needed
     seed_demo_data: bool = False

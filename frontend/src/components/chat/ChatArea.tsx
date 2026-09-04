@@ -7,9 +7,10 @@ import { ChatInput } from './ChatInput';
 import { MessageSearch } from './MessageSearch';
 import { ContextMenu, Copy, Reply, Pin, Forward } from './ContextMenu';
 import { useAutoScroll } from '../../hooks/useAutoScroll';
-import { ArrowDown, Menu, X, Check, Share2, Search, Printer } from 'lucide-react';
-import { cn } from '../../lib/utils';
+import { ArrowDown, Menu, Search, Printer, ChevronDown, ChevronUp } from 'lucide-react';
+import { cn, TIMELINE_GAP_MS } from '../../lib/utils';
 import { sendChatMessage, transcribeAudio, synthesizeSpeech, ApiError } from '../../lib/api';
+import { ShareModal } from './ShareModal';
 import logo from '../../assets/netkathir-logo.png';
 import type { Message } from '../../types';
 
@@ -21,7 +22,7 @@ export function ChatArea() {
     threads, activeThreadId, addMessage, createThread, updateThreadTitle,
     setThreadSessionId, toggleSidebar, isDarkMode, saveScrollPosition,
     scrollPositions, markThreadRead, incrementUnread, togglePinMessage,
-    setReplyTo, updateMessage,
+    setReplyTo, 
   } = useChatStore();
   const activeThread = threads.find((t) => t.id === activeThreadId);
   const messages = activeThread?.messages || [];
@@ -42,6 +43,7 @@ export function ChatArea() {
   // ── Search ──
   const [searchOpen, setSearchOpen] = useState(false);
   const [selectedMsgId, setSelectedMsgId] = useState<string | null>(null);
+  const [pinnedListOpen, setPinnedListOpen] = useState(false);
 
   // ── Context menu ──
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; message: Message } | null>(null);
@@ -53,55 +55,11 @@ export function ChatArea() {
 
   // ── Share modal ──
   const [shareThreadId, setShareThreadId] = useState<string | null>(null);
-  const [copyLinkState, setCopyLinkState] = useState<'idle' | 'copied'>('idle');
-
-  const getShareUrl = useCallback((threadId: string) => {
-    return window.location.origin + '/share/' + threadId;
-  }, []);
 
   const handleShareMessage = useCallback(() => {
     if (!activeThreadId) return;
     setShareThreadId(activeThreadId);
-    setCopyLinkState('idle');
   }, [activeThreadId]);
-
-  const handleCopyShareLink = useCallback(async () => {
-    if (!shareThreadId) return;
-    const url = getShareUrl(shareThreadId);
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(url);
-      } else {
-        const textarea = document.createElement('textarea');
-        textarea.value = url;
-        textarea.style.position = 'fixed';
-        textarea.style.left = '-9999px';
-        document.body.appendChild(textarea);
-        textarea.focus(); textarea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textarea);
-      }
-      setCopyLinkState('copied');
-      setTimeout(() => setCopyLinkState('idle'), 2500);
-    } catch { /* silently fail */ }
-  }, [shareThreadId, getShareUrl]);
-
-  const handleWhatsAppShare = useCallback(() => {
-    if (!shareThreadId) return;
-    const url = getShareUrl(shareThreadId);
-    const thread = threads.find(t => t.id === shareThreadId);
-    const text = thread ? 'Check out this conversation: ' + thread.title + '\n' + url : url;
-    window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank');
-  }, [shareThreadId, getShareUrl, threads]);
-
-  const closeShareModal = useCallback(() => { setShareThreadId(null); setCopyLinkState('idle'); }, []);
-
-  useEffect(() => {
-    if (!shareThreadId) return;
-    const h = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') closeShareModal(); };
-    document.addEventListener('keydown', h);
-    return () => document.removeEventListener('keydown', h);
-  }, [shareThreadId, closeShareModal]);
 
   // ── TTS ──
   const [isSending, setIsSending] = useState(false);
@@ -341,6 +299,38 @@ export function ChatArea() {
 
   const hasMessages = messages.length > 0;
 
+  // Read the in-search-bar query once per render (the input lives in
+  // MessageSearch's local state, so this value updates when ChatArea renders).
+  const searchInput = searchOpen
+    ? document.querySelector<HTMLInputElement>('input[placeholder="Search conversation..."]')?.value || ''
+    : '';
+
+  const pinnedMessages = messages.filter((m) => m.pinned);
+  // Most recently pinned first (newest pinnedAt, fallback to timestamp)
+  const pinnedByRecency = pinnedMessages.length > 0
+    ? [...pinnedMessages].sort((a, b) => (b.pinnedAt || b.timestamp) - (a.pinnedAt || a.timestamp))
+    : [];
+  const latestPinned = pinnedByRecency.length > 0 ? pinnedByRecency[0] : null;
+
+  // Close the pinned list when the thread or the set of pinned messages changes
+  const pinnedIdsKey = pinnedMessages.map((m) => m.id).join(',');
+  useEffect(() => { setPinnedListOpen(false); }, [activeThreadId, pinnedIdsKey]);
+
+  // Close the pinned list on outside click / Escape
+  useEffect(() => {
+    if (!pinnedListOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (e.target && !(e.target as HTMLElement).closest('[data-pinned-panel]')) setPinnedListOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPinnedListOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [pinnedListOpen]);
+
   return (
     <main className="chat-main">
       {hasMessages ? (
@@ -375,6 +365,63 @@ export function ChatArea() {
             isDarkMode={isDarkMode}
           />
 
+          {/* Pinned message banner — WhatsApp-style, always visible under the header.
+              Shows the most recently pinned message; the "N pinned" button opens the
+              list of all pinned messages. Disappears when the last pin is removed. */}
+          {latestPinned && (
+            <div data-pinned-panel className={cn('relative shrink-0 z-30', isDarkMode ? '' : '')}>
+              <div className={cn('flex items-center gap-2 px-4 sm:px-6 py-1.5 border-b', isDarkMode ? 'border-[#2f2f2f] bg-[#1c1c1c]' : 'border-green-100 bg-green-50/70')}>
+                <button
+                  onClick={() => navigateToMessage(latestPinned.id)}
+                  className="flex-1 min-w-0 flex items-baseline gap-1.5 text-left group"
+                  aria-label="View pinned message"
+                >
+                  <Pin className={cn('w-3 h-3 shrink-0 self-center', isDarkMode ? 'text-green-400/80' : 'text-green-600')} />
+                  <span className={cn('text-[11px] font-semibold uppercase tracking-wide shrink-0', isDarkMode ? 'text-green-400/80' : 'text-green-600')}>
+                    {latestPinned.role === 'user' ? 'You' : 'NetKathir'}
+                  </span>
+                  <span className={cn('text-xs truncate', isDarkMode ? 'text-white/70 group-hover:text-white/90' : 'text-midnight-700 group-hover:text-midnight-900')}>
+                    {latestPinned.content}
+                  </span>
+                </button>
+                {pinnedMessages.length > 1 && (
+                  <button
+                    onClick={() => setPinnedListOpen((v) => !v)}
+                    aria-expanded={pinnedListOpen}
+                    aria-label={pinnedListOpen ? 'Hide pinned messages' : 'Show all pinned messages'}
+                    className={cn('flex items-center gap-1 text-[10px] font-semibold shrink-0 rounded-md px-1.5 py-1 transition-colors', pinnedListOpen ? (isDarkMode ? 'text-green-400 bg-white/5' : 'text-green-600 bg-green-100/70') : (isDarkMode ? 'text-white/40 hover:text-green-400 hover:bg-white/5' : 'text-midnight-300 hover:text-green-600 hover:bg-green-100/60'))}
+                  >
+                    {pinnedMessages.length} pinned
+                    {pinnedListOpen
+                      ? <ChevronUp className="w-3 h-3" />
+                      : <ChevronDown className="w-3 h-3" />}
+                  </button>
+                )}
+              </div>
+
+              {/* Dropdown list of all pinned messages, newest first */}
+              {pinnedListOpen && pinnedByRecency.length > 1 && (
+                <div className={cn('absolute top-full left-0 right-0 max-h-64 overflow-y-auto rounded-b-xl border-t-0 shadow-xl animate-fade-in', isDarkMode ? 'bg-[#232323] border border-[#424242]' : 'bg-white border border-green-100')}>
+                  {pinnedByRecency.map((pm) => (
+                    <button
+                      key={pm.id}
+                      onClick={() => { setPinnedListOpen(false); navigateToMessage(pm.id); }}
+                      className={cn('w-full flex items-baseline gap-2 px-4 sm:px-6 py-2.5 text-left transition-colors', isDarkMode ? 'hover:bg-white/[0.06]' : 'hover:bg-green-50/70')}
+                    >
+                      <Pin className={cn('w-3 h-3 shrink-0 self-center', pm.id === latestPinned.id ? (isDarkMode ? 'text-green-400 fill-green-400/40' : 'text-green-600 fill-green-500/30') : (isDarkMode ? 'text-white/25' : 'text-gray-300'))} />
+                      <span className={cn('text-[10px] font-semibold uppercase tracking-wide shrink-0', pm.id === latestPinned.id ? (isDarkMode ? 'text-green-400' : 'text-green-600') : (isDarkMode ? 'text-white/40' : 'text-gray-400'))}>
+                        {pm.role === 'user' ? 'You' : 'NetKathir'}
+                      </span>
+                      <span className={cn('text-xs truncate', pm.id === latestPinned.id ? (isDarkMode ? 'text-white/85' : 'text-midnight-900') : (isDarkMode ? 'text-white/60' : 'text-midnight-600'))}>
+                        {pm.content}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Messages */}
           <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto min-h-0 overscroll-contain">
             <div className="max-w-4xl w-full mx-auto px-4 sm:px-6 md:px-8 py-6 sm:py-10 space-y-6 sm:space-y-8">
@@ -382,16 +429,16 @@ export function ChatArea() {
                 <h2 className={cn('font-display text-xl sm:text-2xl md:text-3xl font-bold tracking-tight', isDarkMode ? 'text-[#ececec]' : 'text-midnight-900')}>{activeThread?.title}</h2>
                 <div className="editorial-rule w-12 sm:w-16 mx-auto mt-3 sm:mt-4" />
               </div>
+
               {messages.map((msg, i) => {
                 const prevMsg = i > 0 ? messages[i - 1] : null;
-                const showTimeline = !prevMsg || (msg.timestamp - prevMsg.timestamp > 5 * 60 * 1000);
+                const showTimeline = !prevMsg || (msg.timestamp - prevMsg.timestamp > TIMELINE_GAP_MS);
                 const timelineDate = new Date(msg.timestamp);
                 const timeStr = timelineDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 const dateStr = timelineDate.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
                 const isSameDay = prevMsg && new Date(prevMsg.timestamp).toDateString() === timelineDate.toDateString();
                 const isBotMsg = msg.role === 'bot';
                 const msgTtsState: TtsState = ttsMsgId === msg.id ? ttsState : 'idle';
-                const searchInput = searchOpen ? document.querySelector<HTMLInputElement>('input[placeholder="Search conversation..."]')?.value || '' : '';
                 return (
                   <div key={msg.id} data-msg-id={msg.id}>
                     {showTimeline && (
@@ -408,7 +455,7 @@ export function ChatArea() {
                       index={i}
                       isDarkMode={isDarkMode}
                       ttsState={msgTtsState}
-                      onTtsPlay={isBotMsg ? () => playTts(msg.id, msg.content) : undefined}
+                      onTtsPlay={isBotMsg ? playTts : undefined}
                       onTtsPause={isBotMsg && msgTtsState === 'playing' ? pauseTts : undefined}
                       onTtsStop={isBotMsg && msgTtsState !== 'idle' ? stopTts : undefined}
                       onShare={isBotMsg ? handleShareMessage : undefined}
@@ -503,50 +550,14 @@ export function ChatArea() {
       )}
 
       {/* Share Modal */}
-      {shareThreadId && (() => {
-        const thread = threads.find(t => t.id === shareThreadId);
-        if (!thread) return null;
-        return (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center px-4" onClick={closeShareModal}>
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-fade-in" />
-            <div
-              className={cn('relative w-full max-w-[380px] rounded-2xl border shadow-2xl animate-scale-in overflow-hidden', isDarkMode ? 'bg-[#2f2f2f] border-[#424242]' : 'bg-white border-gray-200')}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between px-5 pt-5 pb-3">
-                <h3 className={cn('text-sm font-semibold', isDarkMode ? 'text-white' : 'text-gray-900')}>Share conversation</h3>
-                <button onClick={closeShareModal} className={cn('p-1 rounded-lg transition-colors', isDarkMode ? 'hover:bg-white/10 text-white/40' : 'hover:bg-gray-100 text-gray-400')}>
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-              <p className={cn('text-[11px] px-5 pb-3', isDarkMode ? 'text-white/40' : 'text-gray-500')}>Share this conversation with others</p>
-              <div className="mx-5 mb-4">
-                <div className={cn('px-4 py-3 rounded-xl border text-[12px] font-medium', isDarkMode ? 'bg-white/[0.03] border-white/10 text-white/70' : 'bg-gray-50 border-gray-200 text-gray-600')}>
-                  {thread.title}
-                </div>
-              </div>
-              <div className="px-5 pb-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <button onClick={handleWhatsAppShare} className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-xs font-semibold text-white bg-[#25D366] hover:bg-[#20BD5C] transition-all duration-200 active:scale-[0.97] hover:shadow-lg hover:shadow-[#25D366]/20">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
-                    </svg>
-                    WhatsApp
-                  </button>
-                  <button onClick={handleCopyShareLink} className={cn('flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-xs font-semibold transition-all duration-200 active:scale-[0.97]', copyLinkState === 'copied' ? 'bg-green-500 text-white' : (isDarkMode ? 'bg-white/10 text-white hover:bg-white/15 border border-white/10' : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-200'))}>
-                    {copyLinkState === 'copied' ? (<><Check className="w-4 h-4" /> Link copied</>) : (<><Share2 className="w-4 h-4" /> Copy link</>)}
-                  </button>
-                </div>
-              </div>
-              <div className="px-5 pb-5 pt-2">
-                <button onClick={closeShareModal} className={cn('w-full py-2.5 rounded-xl text-xs font-semibold transition-all active:scale-[0.97]', isDarkMode ? 'text-white/40 hover:text-white/60 hover:bg-white/5' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50')}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      {shareThreadId && (
+        <ShareModal
+          threadId={shareThreadId}
+          threadTitle={threads.find((t) => t.id === shareThreadId)?.title || ''}
+          isDarkMode={isDarkMode}
+          onClose={() => setShareThreadId(null)}
+        />
+      )}
     </main>
   );
 }

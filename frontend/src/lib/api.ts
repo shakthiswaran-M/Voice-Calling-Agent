@@ -8,6 +8,19 @@ export const API_BASE_URL =
   (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ||
   'http://localhost:8000';
 
+const ENDPOINTS = {
+  chat: '/api/chat',
+  stt: '/api/stt-test',
+  tts: '/api/tts-test',
+} as const;
+
+/** User-facing messages shown when the backend cannot be reached. */
+const NETWORK_ERROR_MESSAGES = {
+  chat: 'Could not reach the backend. Is the FastAPI server running?',
+  stt: 'Could not reach the backend for speech-to-text.',
+  tts: 'Could not reach the backend for text-to-speech.',
+} as const;
+
 export class ApiError extends Error {
   status?: number;
   constructor(message: string, status?: number) {
@@ -22,6 +35,41 @@ export interface ChatResponse {
   session_id: string;
 }
 
+interface SttResponse {
+  transcript: string;
+}
+
+/**
+ * Single request wrapper for every backend call: normalizes network failures
+ * and non-2xx responses into a consistent `ApiError` with a user-facing
+ * message (server `detail` is preferred when present).
+ */
+async function request(
+  url: string,
+  init: RequestInit,
+  networkErrorMessage: string,
+): Promise<Response> {
+  let res: Response;
+  try {
+    res = await fetch(url, init);
+  } catch {
+    throw new ApiError(networkErrorMessage);
+  }
+
+  if (!res.ok) {
+    let detail = `Request failed (${res.status})`;
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (body?.detail) detail = body.detail;
+    } catch {
+      // ignore — keep the status-based message
+    }
+    throw new ApiError(detail, res.status);
+  }
+
+  return res;
+}
+
 /**
  * Send a chat message to the backend agent.
  *
@@ -34,44 +82,19 @@ export async function sendChatMessage(
   message: string,
   sessionId?: string | null
 ): Promise<ChatResponse> {
-  let res: Response;
-  try {
-    res = await fetch(`${API_BASE_URL}/api/chat`, {
+  const res = await request(
+    `${API_BASE_URL}${ENDPOINTS.chat}`,
+    {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message,
         session_id: sessionId ?? null,
       }),
-    });
-  } catch (err) {
-    throw new ApiError(
-      'Could not reach the backend. Is the FastAPI server running?'
-    );
-  }
-
-  if (!res.ok) {
-    let detail = `Chat request failed (${res.status})`;
-    try {
-      const body = await res.json();
-      if (body?.detail) detail = body.detail;
-    } catch {
-      // ignore — use default detail
-    }
-    throw new ApiError(detail, res.status);
-  }
-
-  return res.json();
-}
-
-/** Quick backend health check, e.g. for a connection indicator. */
-export async function checkHealth(): Promise<boolean> {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/health`);
-    return res.ok;
-  } catch {
-    return false;
-  }
+    },
+    NETWORK_ERROR_MESSAGES.chat
+  );
+  return (await res.json()) as ChatResponse;
 }
 
 /** Send recorded audio to the backend and get back the transcribed text. */
@@ -79,40 +102,25 @@ export async function transcribeAudio(audioBlob: Blob): Promise<string> {
   const formData = new FormData();
   formData.append('file', audioBlob, 'recording.wav');
 
-  let res: Response;
-  try {
-    res = await fetch(`${API_BASE_URL}/api/stt-test`, {
-      method: 'POST',
-      body: formData,
-    });
-  } catch (err) {
-    throw new ApiError('Could not reach the backend for speech-to-text.');
-  }
-
-  if (!res.ok) {
-    throw new ApiError(`STT request failed (${res.status})`, res.status);
-  }
-
-  const data = await res.json();
-  return data.transcript as string;
+  const res = await request(
+    `${API_BASE_URL}${ENDPOINTS.stt}`,
+    { method: 'POST', body: formData },
+    NETWORK_ERROR_MESSAGES.stt
+  );
+  const data = (await res.json()) as SttResponse;
+  return data.transcript;
 }
 
 /** Send text to the backend and get back playable speech audio. */
 export async function synthesizeSpeech(text: string): Promise<Blob> {
-  let res: Response;
-  try {
-    res = await fetch(`${API_BASE_URL}/api/tts-test`, {
+  const res = await request(
+    `${API_BASE_URL}${ENDPOINTS.tts}`,
+    {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text }),
-    });
-  } catch (err) {
-    throw new ApiError('Could not reach the backend for text-to-speech.');
-  }
-
-  if (!res.ok) {
-    throw new ApiError(`TTS request failed (${res.status})`, res.status);
-  }
-
+    },
+    NETWORK_ERROR_MESSAGES.tts
+  );
   return res.blob();
 }

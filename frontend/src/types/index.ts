@@ -6,6 +6,8 @@ export type Message = {
   content: string;
   timestamp: number;
   pinned?: boolean;
+  /** When this message was pinned (used to show the most recently pinned one). */
+  pinnedAt?: number;
 };
 
 export type Thread = {
@@ -45,7 +47,6 @@ export type ChatActions = {
   togglePinThread: (threadId: string) => void;
   setActiveThread: (threadId: string) => void;
   addMessage: (threadId: string, message: Omit<Message, 'id' | 'timestamp'>) => void;
-  updateMessage: (threadId: string, messageId: string, content: string) => void;
   setThreadSessionId: (threadId: string, sessionId: string) => void;
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;

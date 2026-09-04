@@ -95,10 +95,10 @@ export function ChatInput({
           {replyToMessage && (
             <div className={cn('flex items-center gap-2 px-4 py-2 border-b text-xs', isDarkMode ? 'border-white/5 text-white/50 bg-white/[0.02]' : 'border-gray-100 text-gray-500 bg-gray-50/50')}>
               <span className={cn('truncate flex-1', isDarkMode ? 'text-white/60' : 'text-gray-600')}>
-                \u21a9 Replying to: {replyToMessage.length > 60 ? replyToMessage.substring(0, 60) + '...' : replyToMessage}
+                {'\u21a9'} Replying to: {replyToMessage.length > 60 ? replyToMessage.substring(0, 60) + '...' : replyToMessage}
               </span>
               {onClearReply && (
-                <button onClick={onClearReply} className={cn('p-0.5 rounded transition-colors shrink-0', isDarkMode ? 'hover:bg-white/10 text-white/30' : 'hover:bg-gray-200 text-gray-400')}>\u00d7</button>
+                <button onClick={onClearReply} className={cn('p-0.5 rounded transition-colors shrink-0', isDarkMode ? 'hover:bg-white/10 text-white/30' : 'hover:bg-gray-200 text-gray-400')}>{'\u00d7'}</button>
               )}
             </div>
           )}
@@ -208,10 +208,10 @@ export function ChatInput({
         <div className="max-w-4xl mx-auto px-3 sm:px-6">
           <div className={cn('flex items-center gap-2 px-3 py-2 rounded-t-xl border border-b-0 text-xs', isDarkMode ? 'border-white/5 text-white/50 bg-white/[0.02]' : 'border-gray-200 text-gray-500 bg-gray-50')}>
             <span className={cn('truncate flex-1', isDarkMode ? 'text-white/60' : 'text-gray-600')}>
-              \u21a9 Replying to: {replyToMessage.length > 60 ? replyToMessage.substring(0, 60) + '...' : replyToMessage}
+              {'\u21a9'} Replying to: {replyToMessage.length > 60 ? replyToMessage.substring(0, 60) + '...' : replyToMessage}
             </span>
             {onClearReply && (
-              <button onClick={onClearReply} className={cn('p-0.5 rounded transition-colors shrink-0', isDarkMode ? 'hover:bg-white/10 text-white/30' : 'hover:bg-gray-200 text-gray-400')}>\u00d7</button>
+              <button onClick={onClearReply} className={cn('p-0.5 rounded transition-colors shrink-0', isDarkMode ? 'hover:bg-white/10 text-white/30' : 'hover:bg-gray-200 text-gray-400')}>{'\u00d7'}</button>
             )}
           </div>
         </div>
