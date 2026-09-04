@@ -40,12 +40,19 @@ export function useAutoScroll({
   });
   const isAutoScrollingRef = useRef(false);
   const hasSentRef = useRef(false);
+  // True from the moment the user sends until they manually scroll away from
+  // the bottom: while set, incoming replies scroll into view even if the
+  // geometric "at bottom" check misses (e.g. the typing indicator being
+  // replaced by a taller bot message shifts the bottom edge).
+  const followTailRef = useRef(false);
   const prevThreadIdRef = useRef<string | null>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const visibleMessagesRef = useRef<Map<string, DOMRect>>(new Map());
   const lastSavedMessageRef = useRef<string | null>(null);
   const throttleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restoreTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Sync refs with props ──
   useEffect(() => {
@@ -75,16 +82,33 @@ export function useAutoScroll({
 
   // ── Handle user scroll events ──
   const handleScroll = useCallback(() => {
-    if (isAutoScrollingRef.current || trackingRef.current.isRestoringScroll) return;
-
     const container = containerRef.current;
     if (!container) return;
+
+    // A programmatic scroll is in flight. Release the guard as soon as the
+    // animation actually reaches the bottom so the position is treated as a
+    // user position again (the fallback timer in `scrollToBottom` covers the
+    // case where no scroll event fires, e.g. already at the bottom).
+    if (isAutoScrollingRef.current) {
+      if (checkIsAtBottom()) {
+        isAutoScrollingRef.current = false;
+        trackingRef.current.isAtBottom = true;
+        setIsScrolledUp(false);
+        setShowScrollButton(false);
+      }
+      return;
+    }
+
+    if (trackingRef.current.isRestoringScroll) return;
 
     const atBottom = checkIsAtBottom();
     trackingRef.current.isAtBottom = atBottom;
     setIsScrolledUp(!atBottom);
     if (atBottom) {
       setShowScrollButton(false);
+    } else {
+      // The user scrolled away from the tail — stop following new messages.
+      followTailRef.current = false;
     }
   }, [checkIsAtBottom]);
 
@@ -99,24 +123,63 @@ export function useAutoScroll({
       behavior: smooth ? 'smooth' : 'auto',
     });
 
+    // Fallback guard release. Normally `handleScroll` releases the guard as
+    // soon as the bottom is reached; this timer only kicks in when no scroll
+    // event fires (e.g. the container is already at the bottom). Re-measure
+    // instead of force-flagging so a mid-animation interruption isn't masked.
+    if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
     const duration = smooth ? 500 : 0;
-    setTimeout(() => {
+    resetTimerRef.current = setTimeout(() => {
+      resetTimerRef.current = null;
       isAutoScrollingRef.current = false;
-      trackingRef.current.isAtBottom = true;
-      setIsScrolledUp(false);
-      setShowScrollButton(false);
-    }, duration + 50);
-  }, []);
+      const atBottom = checkIsAtBottom();
+      trackingRef.current.isAtBottom = atBottom;
+      setIsScrolledUp(!atBottom);
+      if (atBottom) setShowScrollButton(false);
+    }, duration + 100);
+  }, [checkIsAtBottom]);
 
   // ── Scroll to bottom when user sends a message ──
+  // The actual scroll happens in the `[messages.length]` effect below, AFTER
+  // React has committed the new message to the DOM. Scrolling here would read
+  // a stale `scrollHeight` (the new bubble is not rendered yet) and leave the
+  // user's own message below the fold.
   const scrollToBottomOnSend = useCallback(() => {
     hasSentRef.current = true;
+    followTailRef.current = true;
     trackingRef.current.isRestoringScroll = false;
     trackingRef.current.isAtBottom = true;
     setIsScrolledUp(false);
     setShowScrollButton(false);
-    scrollToBottom(true);
-  }, [scrollToBottom]);
+  }, []);
+
+  // ── Re-check after scrolling ──
+  // The message list height is not always final at commit time (the typing
+  // indicator is replaced by the reply, markdown/list content settles, fonts
+  // swap, ...). A single scroll measured too early can land short with no
+  // further event to correct it. Watch for a short while and re-scroll until
+  // the tail is actually at the bottom or the user scrolls away.
+  const settleToBottom = useCallback(() => {
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+    let checks = 0;
+    const check = () => {
+      checks += 1;
+      const container = containerRef.current;
+      if (!container || checks > 12) return; // give up after ~1.2s
+
+      // The user took over and scrolled away — stop following.
+      if (!followTailRef.current && !checkIsAtBottom()) return;
+
+      if (!checkIsAtBottom()) {
+        scrollToBottom(false);
+        settleTimerRef.current = setTimeout(check, 100);
+      } else if (checks <= 3) {
+        // Looks settled; give the layout a few more frames before trusting it.
+        settleTimerRef.current = setTimeout(check, 100);
+      }
+    };
+    settleTimerRef.current = setTimeout(check, 60);
+  }, [checkIsAtBottom, scrollToBottom]);
 
   // ── IntersectionObserver: track which message is visible ──
   useEffect(() => {
@@ -191,6 +254,9 @@ export function useAutoScroll({
     // If the thread didn't actually change, skip
     if (prevThreadId === threadId) return;
 
+    // New thread context: stop following the previous thread's tail.
+    followTailRef.current = false;
+
     // ── First-time thread: no messages yet → skip (will handle on messages change) ──
     if (messages.length === 0) {
       trackingRef.current.isRestoringScroll = true;
@@ -245,9 +311,15 @@ export function useAutoScroll({
     const container = containerRef.current;
     if (!container) return;
 
-    // Skip if we just sent a message (scrollToBottomOnSend handles it)
+    // A message was just sent. The DOM now contains it (this effect runs after
+    // commit), so measure the real `scrollHeight` and bring the newest content
+    // into view. `scrollToBottomOnSend` only flags the intent.
     if (hasSentRef.current) {
       hasSentRef.current = false;
+      requestAnimationFrame(() => {
+        scrollToBottom(true);
+        settleToBottom();
+      });
       return;
     }
 
@@ -255,11 +327,25 @@ export function useAutoScroll({
     if (trackingRef.current.isRestoringScroll) return;
 
     requestAnimationFrame(() => {
+      // A programmatic scroll (e.g. the one started by the send) is still
+      // animating — keep it pointed at the newest bottom instead of judging
+      // "at bottom" mid-flight and wrongly showing the scroll button.
+      if (isAutoScrollingRef.current) {
+        scrollToBottom(true);
+        settleToBottom();
+        return;
+      }
+
       const atBottom = checkIsAtBottom();
       trackingRef.current.isAtBottom = atBottom;
       setIsScrolledUp(!atBottom);
-      if (atBottom) {
+      // While the user is following the tail (they just sent and haven't
+      // scrolled away), always bring the new content into view — the raw
+      // geometric check can miss when the typing indicator is replaced by a
+      // taller bot message, which shifts the bottom edge mid-conversation.
+      if (atBottom || followTailRef.current) {
         scrollToBottom(false);
+        settleToBottom();
       } else {
         setShowScrollButton(true);
       }
@@ -272,6 +358,8 @@ export function useAutoScroll({
     return () => {
       if (throttleTimerRef.current) clearTimeout(throttleTimerRef.current);
       if (restoreTimeoutRef.current) clearTimeout(restoreTimeoutRef.current);
+      if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+      if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
       if (observerRef.current) observerRef.current.disconnect();
     };
   }, []);
