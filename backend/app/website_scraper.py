@@ -3,9 +3,10 @@ import hashlib
 import httpx
 from bs4 import BeautifulSoup
 
+from app.config import settings
 from app.database import database
 
-BASE_URL = "https://netkathir.com"
+BASE_URL = settings.website_base_url  # Assuming the base URL is stored in settings
 
 PAGES = [
     "/",

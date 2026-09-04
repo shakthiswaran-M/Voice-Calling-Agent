@@ -6,6 +6,8 @@ ENV_PATH = BASE_DIR / ".env"
 
 
 class Settings(BaseSettings):
+    # Website scraping configuration
+    website_base_url: str 
     # LLM configuration
     llm_api_key: str
     llm_model: str 
