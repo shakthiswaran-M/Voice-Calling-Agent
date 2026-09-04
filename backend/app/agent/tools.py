@@ -145,6 +145,28 @@ async def faq_lookup(topic: str) -> dict:
     return {"error": f"No FAQ found for topic '{topic}'"}
 
 
+async def search_website_content(query: str) -> dict:
+    """Search the NetKathir website content for information not covered by other tools."""
+    if not query.strip():
+        return {"error": "Query is required."}
+
+    results = await database.search_website_content(query)
+
+    if not results:
+        return {"error": f"No website content found matching '{query}'"}
+
+    return {
+        "results": [
+            {
+                "title": row["title"],
+                "url": row["url"],
+                "content": row["content"][:1200],
+            }
+            for row in results
+        ]
+    }
+
+
 TOOL_SCHEMAS = [
     {"type": "function", "function": {
         "name": "get_customer",
@@ -213,6 +235,13 @@ TOOL_SCHEMAS = [
             "topic": {"type": "string", "description": "The FAQ topic or question."}
         }, "required": ["topic"]},
     }},
+    {"type": "function", "function": {
+        "name": "search_website_content",
+        "description": "Search the NetKathir website content for general company information not covered by other tools — e.g. blog topics, product details, project info.",
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "The topic or question to search the website content for."}
+        }, "required": ["query"]},
+    }},
 ]
 
 AVAILABLE_TOOLS = {
@@ -225,4 +254,5 @@ AVAILABLE_TOOLS = {
     "transfer_to_human": transfer_to_human,
     "get_case_study": get_case_study,
     "faq_lookup": faq_lookup,
+    "search_website_content": search_website_content,
 }

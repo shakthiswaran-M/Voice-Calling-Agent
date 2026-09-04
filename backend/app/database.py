@@ -7,20 +7,50 @@ import asyncpg
 
 from app.config import settings
 
+
 # ============================================================
 # REFERENCE DATA (real business content, seeded on startup)
 # ============================================================
 
 SERVICES = [
     ("AI/ML", "AI/ML", "AI and machine learning solutions for business needs."),
-    ("chatbots", "Chatbots", "Intelligent chatbot solutions for customer and business interactions."),
-    ("SaaS development", "SaaS Development", "Scalable software-as-a-service application development."),
-    ("enterprise applications", "Enterprise Applications", "Enterprise-grade applications designed for business operations."),
-    ("cloud/migration", "Cloud / Migration", "Cloud solutions and migration support for modernizing applications and infrastructure."),
-    ("DevOps", "DevOps", "DevOps solutions for development, deployment, automation, and operations."),
-    ("IT consulting", "IT Consulting", "IT consulting services to help organizations plan and implement technology solutions."),
-    ("enterprise architecture", "Enterprise Architecture", "Enterprise architecture solutions for designing scalable technology systems."),
+    (
+        "chatbots",
+        "Chatbots",
+        "Intelligent chatbot solutions for customer and business interactions.",
+    ),
+    (
+        "SaaS development",
+        "SaaS Development",
+        "Scalable software-as-a-service application development.",
+    ),
+    (
+        "enterprise applications",
+        "Enterprise Applications",
+        "Enterprise-grade applications designed for business operations.",
+    ),
+    (
+        "cloud/migration",
+        "Cloud / Migration",
+        "Cloud solutions and migration support for modernizing applications and infrastructure.",
+    ),
+    (
+        "DevOps",
+        "DevOps",
+        "DevOps solutions for development, deployment, automation, and operations.",
+    ),
+    (
+        "IT consulting",
+        "IT Consulting",
+        "IT consulting services to help organizations plan and implement technology solutions.",
+    ),
+    (
+        "enterprise architecture",
+        "Enterprise Architecture",
+        "Enterprise architecture solutions for designing scalable technology systems.",
+    ),
 ]
+
 
 CASE_STUDIES = [
     ("APPGM", "APPGM", "APPGM case study."),
@@ -28,10 +58,23 @@ CASE_STUDIES = [
     ("WhyScience", "WhyScience", "WhyScience case study."),
 ]
 
+
 FAQS = [
-    ("iso 27001", "ISO 27001", "NetKathir's ISO 27001 information should be provided from the company's approved FAQ information."),
-    ("founded", "Company founding year", "NetKathir was founded in 2015."),
-    ("engagement process", "Engagement process", "NetKathir's typical engagement process should follow the company's approved engagement workflow."),
+    (
+        "iso 27001",
+        "ISO 27001",
+        "NetKathir's ISO 27001 information should be provided from the company's approved FAQ information.",
+    ),
+    (
+        "founded",
+        "Company founding year",
+        "NetKathir was founded in 2015.",
+    ),
+    (
+        "engagement process",
+        "Engagement process",
+        "NetKathir's typical engagement process should follow the company's approved engagement workflow.",
+    ),
 ]
 
 
@@ -150,6 +193,15 @@ class Database:
                 answer TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS website_content (
+                id BIGSERIAL PRIMARY KEY,
+                url TEXT UNIQUE NOT NULL,
+                title TEXT,
+                content TEXT NOT NULL,
+                content_hash TEXT,
+                last_scraped_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+
             CREATE INDEX IF NOT EXISTS messages_session_id_timestamp_idx
                 ON messages (session_id, timestamp);
             """
@@ -159,6 +211,7 @@ class Database:
 
     async def _seed_reference_data(self) -> None:
         """Seeds real business content — services, case studies, FAQs."""
+
         pool = self._require_pool()
 
         await pool.executemany(
@@ -193,7 +246,8 @@ class Database:
     # ------------------------------------------------------------
 
     async def ensure_conversation(self, session_id: str) -> None:
-        """Creates a conversation row if one doesn't already exist."""
+        """Creates a conversation row if one doesn't already exists."""
+
         pool = self._require_pool()
 
         await pool.execute(
@@ -210,6 +264,7 @@ class Database:
         older_than_days: int | None = None,
     ) -> None:
         """Deletes conversations that haven't been updated."""
+
         days = (
             older_than_days
             if older_than_days is not None
@@ -267,6 +322,7 @@ class Database:
         session_id: str,
     ) -> list[dict[str, Any]]:
         """Returns all messages for a session, oldest first."""
+
         pool = self._require_pool()
 
         rows = await pool.fetch(
@@ -293,6 +349,7 @@ class Database:
         messages: Iterable[dict[str, Any]],
     ) -> None:
         """Saves user/assistant messages for a session."""
+
         pool = self._require_pool()
 
         async with pool.acquire() as connection:
@@ -345,6 +402,7 @@ class Database:
         session_id: str,
     ) -> dict[str, Any]:
         """Returns the stored context dict for a conversation."""
+
         pool = self._require_pool()
 
         context = await pool.fetchval(
@@ -370,6 +428,7 @@ class Database:
         context: dict[str, Any],
     ) -> None:
         """Overwrites the stored context dict for a conversation."""
+
         pool = self._require_pool()
 
         await pool.execute(
@@ -383,6 +442,88 @@ class Database:
             session_id,
             json.dumps(context),
         )
+
+    # ------------------------------------------------------------
+    # Website content
+    # ------------------------------------------------------------
+
+    async def save_website_content(
+        self,
+        url: str,
+        title: str,
+        content: str,
+        content_hash: str,
+    ) -> None:
+        """Saves or updates scraped website content."""
+
+        pool = self._require_pool()
+
+        await pool.execute(
+            """
+            INSERT INTO website_content (
+                url,
+                title,
+                content,
+                content_hash,
+                last_scraped_at
+            )
+            VALUES ($1, $2, $3, $4, NOW())
+
+            ON CONFLICT (url)
+            DO UPDATE SET
+                title = EXCLUDED.title,
+                content = EXCLUDED.content,
+                content_hash = EXCLUDED.content_hash,
+                last_scraped_at = NOW()
+            """,
+            url,
+            title,
+            content,
+            content_hash,
+        )
+
+    async def get_website_content(self) -> str:
+        """Returns all scraped website content."""
+
+        pool = self._require_pool()
+
+        rows = await pool.fetch(
+            """
+            SELECT title, content
+            FROM website_content
+            ORDER BY url
+            """
+        )
+
+        return "\n\n".join(
+            f"## {row['title']}\n{row['content']}"
+            for row in rows
+        )
+
+    async def search_website_content(
+        self,
+        query: str,
+        limit: int = 3,
+    ) -> list[dict[str, Any]]:
+        """Searches scraped website content for a keyword or topic."""
+
+        pool = self._require_pool()
+
+        pattern = f"%{query.strip()}%"
+
+        rows = await pool.fetch(
+            """
+            SELECT url, title, content
+            FROM website_content
+            WHERE content ILIKE $1 OR title ILIKE $1
+            ORDER BY url
+            LIMIT $2
+            """,
+            pattern,
+            limit,
+        )
+
+        return [dict(row) for row in rows]
 
     # ------------------------------------------------------------
     # Internal
