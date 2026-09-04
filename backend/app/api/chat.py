@@ -3,12 +3,13 @@ import re
 import logging
 import json
 import inspect
+import os
 
 from fastapi import APIRouter, HTTPException
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 
-from app.agent.business_info import BUSINESS_INFO
+from app.agent.business_info import BEHAVIOR_RULES
 from app.agent.prompts import AGENT_INSTRUCTIONS, SYSTEM_PROMPT
 from app.agent.tools import AVAILABLE_TOOLS, TOOL_SCHEMAS
 from app.config import settings
@@ -123,7 +124,7 @@ async def chat(req: ChatRequest):
     messages = [
         {
             "role": "system",
-            "content": f"{SYSTEM_PROMPT}\n\n{AGENT_INSTRUCTIONS}\n\nBusiness information:\n{BUSINESS_INFO}",
+            "content": f"{SYSTEM_PROMPT}\n\n{AGENT_INSTRUCTIONS}\n\nBehavior rules:\n{BEHAVIOR_RULES}",
         }
     ]
     if context_message:
@@ -153,6 +154,11 @@ async def chat(req: ChatRequest):
 
             for tool_call in tool_calls:
                 tool_name = tool_call.function.name
+                if os.getenv("DEBUG", "").lower() == "true":
+                    print(
+                        f"LLM tool call: {tool_name}({tool_call.function.arguments or '{}'})",
+                        flush=True,
+                    )
                 tool = AVAILABLE_TOOLS.get(tool_name)
                 if tool is None:
                     raise ValueError(f"Unknown tool requested: {tool_name}")
