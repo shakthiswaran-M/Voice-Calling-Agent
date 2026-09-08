@@ -122,5 +122,9 @@ export async function synthesizeSpeech(text: string): Promise<Blob> {
     },
     NETWORK_ERROR_MESSAGES.tts
   );
-  return res.blob();
+  const audioBlob = await res.blob();
+  if (audioBlob.size === 0) {
+    throw new ApiError('Text-to-speech returned empty audio.');
+  }
+  return audioBlob;
 }

@@ -15,15 +15,19 @@ def _synthesize_speech_sync(text: str) -> bytes:
         text=text,
         output_format="mp3_44100_128",
     )
-    if isinstance(audio, bytes):
-        return audio
-    return b"".join(audio)
+    audio_bytes = audio if isinstance(audio, bytes) else b"".join(audio)
+    if not audio_bytes:
+        raise ValueError("ElevenLabs returned empty audio")
+    return audio_bytes
 
 
 async def synthesize_speech(text: str) -> bytes:
     """Convert text to speech using ElevenLabs, off the event loop."""
+    logger.info("[TTS] Trying ElevenLabs")
     try:
-        return await asyncio.to_thread(_synthesize_speech_sync, text)
+        audio_bytes = await asyncio.to_thread(_synthesize_speech_sync, text)
     except Exception:
-        logger.exception("ElevenLabs TTS request failed")
+        logger.exception("[TTS] ElevenLabs failed")
         raise
+    logger.info("[TTS] ElevenLabs succeeded")
+    return audio_bytes

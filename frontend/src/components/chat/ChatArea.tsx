@@ -10,6 +10,7 @@ import { useAutoScroll } from '../../hooks/useAutoScroll';
 import { ArrowDown, Menu, Search, Printer, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn, TIMELINE_GAP_MS } from '../../lib/utils';
 import { sendChatMessage, transcribeAudio, synthesizeSpeech, ApiError } from '../../lib/api';
+import { cancelBrowserTts, speakWithBrowserTts } from '../../lib/browserTts';
 import { ShareModal } from './ShareModal';
 import logo from '../../assets/netkathir-logo.png';
 import type { Message } from '../../types';
@@ -68,41 +69,79 @@ export function ChatArea() {
   const [ttsState, setTtsState] = useState<TtsState>('idle');
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
+  const ttsRequestIdRef = useRef(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
   const stopTts = useCallback(() => {
+    ttsRequestIdRef.current += 1;
     if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; audioRef.current = null; }
     if (audioUrlRef.current) { URL.revokeObjectURL(audioUrlRef.current); audioUrlRef.current = null; }
+    cancelBrowserTts();
     setTtsMsgId(null); setTtsState('idle');
   }, []);
 
   const pauseTts = useCallback(() => {
     if (audioRef.current && ttsState === 'playing') { audioRef.current.pause(); setTtsState('paused'); }
+    else if (ttsState === 'playing' && 'speechSynthesis' in window) {
+      window.speechSynthesis.pause();
+      setTtsState('paused');
+    }
   }, [ttsState]);
 
   const playTts = useCallback(async (msgId: string, text: string) => {
     if (ttsMsgId === msgId && ttsState === 'paused' && audioRef.current) {
       audioRef.current.play(); setTtsState('playing'); return;
     }
+    if (ttsMsgId === msgId && ttsState === 'paused' && 'speechSynthesis' in window) {
+      window.speechSynthesis.resume(); setTtsState('playing'); return;
+    }
+    const requestId = ++ttsRequestIdRef.current;
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
     if (audioUrlRef.current) { URL.revokeObjectURL(audioUrlRef.current); audioUrlRef.current = null; }
+    cancelBrowserTts();
+
+    const finishTts = () => {
+      if (ttsRequestIdRef.current !== requestId) return;
+      setTtsMsgId(null); setTtsState('idle'); audioRef.current = null;
+      if (audioUrlRef.current) { URL.revokeObjectURL(audioUrlRef.current); audioUrlRef.current = null; }
+    };
+
+    const fallbackToBrowserTts = () => {
+      if (ttsRequestIdRef.current !== requestId) return;
+      console.warn('[TTS] Falling back to Web Speech API');
+      setTtsMsgId(msgId);
+      setTtsState('playing');
+      if (!speakWithBrowserTts(text, finishTts)) finishTts();
+    };
+
     try {
       const audioBlob = await synthesizeSpeech(text);
+      if (ttsRequestIdRef.current !== requestId) return;
       const url = URL.createObjectURL(audioBlob);
       const audio = new Audio(url);
       audioRef.current = audio; audioUrlRef.current = url;
       setTtsMsgId(msgId); setTtsState('playing');
-      audio.onended = () => { setTtsMsgId(null); setTtsState('idle'); audioRef.current = null; URL.revokeObjectURL(url); audioUrlRef.current = null; };
-      audio.onerror = () => { setTtsMsgId(null); setTtsState('idle'); audioRef.current = null; URL.revokeObjectURL(url); audioUrlRef.current = null; };
+      let audioStarted = false;
+      audio.onplay = () => { audioStarted = true; console.info('[TTS] Playing ElevenLabs audio'); };
+      audio.onended = finishTts;
+      audio.onerror = () => {
+        if (audioStarted) finishTts();
+        else fallbackToBrowserTts();
+      };
       await audio.play();
-    } catch (err) { console.error('TTS failed:', err); setTtsMsgId(null); setTtsState('idle'); }
+    } catch (err) {
+      if (ttsRequestIdRef.current !== requestId) return;
+      console.warn('[TTS] ElevenLabs playback/request failed:', err);
+      fallbackToBrowserTts();
+    }
   }, [ttsMsgId, ttsState]);
 
   useEffect(() => {
     return () => {
       if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
       if (audioUrlRef.current) { URL.revokeObjectURL(audioUrlRef.current); }
+      cancelBrowserTts();
     };
   }, []);
 
@@ -112,7 +151,7 @@ export function ChatArea() {
     const prevId = prevThreadIdForRestore.current;
     prevThreadIdForRestore.current = activeThreadId;
     if (!activeThreadId || prevId === activeThreadId) return;
-    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; setTtsMsgId(null); setTtsState('idle'); }
+    if (audioRef.current || ttsMsgId) stopTts();
     setSearchOpen(false); setSelectedMsgId(null);
     const saved = scrollPositions[activeThreadId];
     if (saved) {
@@ -122,7 +161,7 @@ export function ChatArea() {
     }
     // Mark thread as read
     if (activeThreadId) markThreadRead(activeThreadId);
-  }, [activeThreadId, scrollPositions, markThreadRead]);
+  }, [activeThreadId, scrollPositions, markThreadRead, stopTts, ttsMsgId]);
 
   // ── Track unread for other threads ──
   const prevMsgCountRef = useRef<Record<string, number>>({});
