@@ -70,11 +70,14 @@ export function ChatArea() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
   const ttsRequestIdRef = useRef(0);
+  const ttsAbortControllerRef = useRef<AbortController | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
   const stopTts = useCallback(() => {
     ttsRequestIdRef.current += 1;
+    ttsAbortControllerRef.current?.abort();
+    ttsAbortControllerRef.current = null;
     if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; audioRef.current = null; }
     if (audioUrlRef.current) { URL.revokeObjectURL(audioUrlRef.current); audioUrlRef.current = null; }
     cancelBrowserTts();
@@ -97,39 +100,108 @@ export function ChatArea() {
       window.speechSynthesis.resume(); setTtsState('playing'); return;
     }
     const requestId = ++ttsRequestIdRef.current;
+    ttsAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    ttsAbortControllerRef.current = abortController;
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
     if (audioUrlRef.current) { URL.revokeObjectURL(audioUrlRef.current); audioUrlRef.current = null; }
     cancelBrowserTts();
 
     const finishTts = () => {
       if (ttsRequestIdRef.current !== requestId) return;
+      ttsAbortControllerRef.current = null;
       setTtsMsgId(null); setTtsState('idle'); audioRef.current = null;
       if (audioUrlRef.current) { URL.revokeObjectURL(audioUrlRef.current); audioUrlRef.current = null; }
     };
 
+    let fallbackStarted = false;
     const fallbackToBrowserTts = () => {
-      if (ttsRequestIdRef.current !== requestId) return;
+      if (ttsRequestIdRef.current !== requestId || fallbackStarted) return;
+      fallbackStarted = true;
       console.warn('[TTS] Falling back to Web Speech API');
+      abortController.abort();
+      if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+      if (audioUrlRef.current) { URL.revokeObjectURL(audioUrlRef.current); audioUrlRef.current = null; }
       setTtsMsgId(msgId);
       setTtsState('playing');
       if (!speakWithBrowserTts(text, finishTts)) finishTts();
     };
 
     try {
-      const audioBlob = await synthesizeSpeech(text);
+      const response = await synthesizeSpeech(text, abortController.signal);
       if (ttsRequestIdRef.current !== requestId) return;
-      const url = URL.createObjectURL(audioBlob);
-      const audio = new Audio(url);
-      audioRef.current = audio; audioUrlRef.current = url;
+      if (!response.body || typeof MediaSource === 'undefined' || !MediaSource.isTypeSupported('audio/mpeg')) {
+        throw new Error('Streaming audio is not supported by this browser');
+      }
+
+      const mediaSource = new MediaSource();
+      const mediaUrl = URL.createObjectURL(mediaSource);
+      const audio = new Audio(mediaUrl);
+      audioRef.current = audio; audioUrlRef.current = mediaUrl;
       setTtsMsgId(msgId); setTtsState('playing');
       let audioStarted = false;
-      audio.onplay = () => { audioStarted = true; console.info('[TTS] Playing ElevenLabs audio'); };
-      audio.onended = finishTts;
-      audio.onerror = () => {
+      let streamFinished = false;
+      let playRequested = false;
+      const chunkQueue: ArrayBuffer[] = [];
+      let sourceBuffer: SourceBuffer | null = null;
+
+      const failStream = (error: unknown) => {
+        console.warn('[TTS] ElevenLabs stream failed:', error);
         if (audioStarted) finishTts();
         else fallbackToBrowserTts();
       };
-      await audio.play();
+
+      const appendNextChunk = () => {
+        if (!sourceBuffer || sourceBuffer.updating || chunkQueue.length === 0) {
+          if (sourceBuffer && streamFinished && !sourceBuffer.updating && mediaSource.readyState === 'open') {
+            mediaSource.endOfStream();
+          }
+          return;
+        }
+        try {
+          sourceBuffer.appendBuffer(chunkQueue.shift()!);
+        } catch (error) {
+          failStream(error);
+        }
+      };
+
+      audio.onplay = () => {
+        audioStarted = true;
+        console.info('[TTS] Playing ElevenLabs audio stream');
+      };
+      audio.onended = finishTts;
+      audio.onerror = () => failStream(new Error('ElevenLabs audio playback failed'));
+      mediaSource.addEventListener('sourceopen', async () => {
+        try {
+          sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
+          sourceBuffer.addEventListener('updateend', () => {
+            if (!audioStarted && !playRequested) {
+              playRequested = true;
+              void audio.play()
+                .then(() => {
+                  if (!audioStarted) console.info('[TTS] ElevenLabs audio stream is ready');
+                })
+                .catch(failStream);
+            }
+            appendNextChunk();
+          });
+
+          const reader = response.body!.getReader();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value?.byteLength) {
+              const chunk = new Uint8Array(value);
+              chunkQueue.push(chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength) as ArrayBuffer);
+              appendNextChunk();
+            }
+          }
+          streamFinished = true;
+          appendNextChunk();
+        } catch (error) {
+          failStream(error);
+        }
+      }, { once: true });
     } catch (err) {
       if (ttsRequestIdRef.current !== requestId) return;
       console.warn('[TTS] ElevenLabs playback/request failed:', err);

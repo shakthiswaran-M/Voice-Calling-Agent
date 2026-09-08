@@ -1,10 +1,10 @@
 import logging
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.providers.stt import transcribe_audio
-from app.providers.tts import synthesize_speech
+from app.providers.tts import stream_speech
 from app.providers.exotel import place_call
 
 router = APIRouter()
@@ -28,13 +28,8 @@ class TTSRequest(BaseModel):
 
 @router.post("/api/tts-test")
 async def tts_test(req: TTSRequest):
-    try:
-        audio_bytes = await synthesize_speech(req.text)
-    except Exception:
-        logger.exception("TTS request failed")
-        raise HTTPException(status_code=502, detail="Text-to-speech service unavailable.")
-    return Response(
-        content=audio_bytes,
+    return StreamingResponse(
+        stream_speech(req.text),
         media_type="audio/mpeg",
         headers={"Content-Disposition": "attachment; filename=tts_test.mp3"},
     )

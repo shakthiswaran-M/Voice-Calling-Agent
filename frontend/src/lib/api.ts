@@ -111,20 +111,16 @@ export async function transcribeAudio(audioBlob: Blob): Promise<string> {
   return data.transcript;
 }
 
-/** Send text to the backend and get back playable speech audio. */
-export async function synthesizeSpeech(text: string): Promise<Blob> {
-  const res = await request(
+/** Send text to the backend and get back a streaming ElevenLabs response. */
+export async function synthesizeSpeech(text: string, signal?: AbortSignal): Promise<Response> {
+  return request(
     `${API_BASE_URL}${ENDPOINTS.tts}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text }),
+      signal,
     },
     NETWORK_ERROR_MESSAGES.tts
   );
-  const audioBlob = await res.blob();
-  if (audioBlob.size === 0) {
-    throw new ApiError('Text-to-speech returned empty audio.');
-  }
-  return audioBlob;
 }
