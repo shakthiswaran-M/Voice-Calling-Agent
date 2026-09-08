@@ -9,6 +9,7 @@ import { ContextMenu, Copy, Reply, Pin, Forward } from './ContextMenu';
 import { useAutoScroll } from '../../hooks/useAutoScroll';
 import { ArrowDown, Menu, Search, Printer, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn, TIMELINE_GAP_MS } from '../../lib/utils';
+import { webmBlobToWav } from '../../lib/audioWav';
 import { sendChatMessage, transcribeAudio, synthesizeSpeech, ApiError } from '../../lib/api';
 import { cancelBrowserTts, speakWithBrowserTts } from '../../lib/browserTts';
 import { ShareModal } from './ShareModal';
@@ -286,10 +287,12 @@ export function ChatArea() {
       recorder.ondataavailable = (e) => audioChunksRef.current.push(e.data);
       recorder.onstop = async () => {
         stream.getTracks().forEach((track) => track.stop());
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const webmBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         const threadId = activeThreadId || createThread().id;
         setIsSending(true);
         try {
+          // Convert WebM → 16-bit PCM WAV before upload (see lib/audioWav.ts).
+          const audioBlob = await webmBlobToWav(webmBlob);
           const transcript = await transcribeAudio(audioBlob);
           if (!transcript || !transcript.trim()) {
             addMessage(threadId, { role: 'bot', content: "Sorry, I didn't catch that." }); return;
