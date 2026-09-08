@@ -6,7 +6,7 @@ import re
 
 from openai import AsyncOpenAI
 
-from app.agent.business_info import BEHAVIOR_RULES
+
 from app.agent.prompts import AGENT_INSTRUCTIONS, SYSTEM_PROMPT
 from app.agent.tools import AVAILABLE_TOOLS, TOOL_SCHEMAS
 from app.config import settings
@@ -60,7 +60,7 @@ async def generate_response(
             "content": (
                 f"{SYSTEM_PROMPT}\n\n"
                 f"{AGENT_INSTRUCTIONS}\n\n"
-                f"Behavior rules:\n{BEHAVIOR_RULES}"
+                
             ),
         }
     ]
