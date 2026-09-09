@@ -6,20 +6,6 @@ import { ChatStore, Thread, Message } from '../types';
 
 const generateId = () => Math.random().toString(36).substring(2, 15);
 
-export const formatTimestamp = (date: number) => {
-  const now = Date.now();
-  const diff = now - date;
-  const minutes = Math.floor(diff / 60000);
-  const hours = Math.floor(diff / 3600000);
-  const days = Math.floor(diff / 86400000);
-
-  if (minutes < 1) return 'Just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  if (days < 7) return `${days}d ago`;
-  return new Date(date).toLocaleDateString();
-};
-
 export const useChatStore = create<ChatStore>()(
   persist(
     (set) => ({
@@ -94,16 +80,6 @@ export const useChatStore = create<ChatStore>()(
         }));
       },
 
-      updateMessage: (threadId: string, messageId: string, content: string) => {
-        set((state) => ({
-          threads: state.threads.map((t) =>
-            t.id === threadId
-              ? { ...t, messages: t.messages.map((m) => m.id === messageId ? { ...m, content } : m) }
-              : t
-          ),
-        }));
-      },
-
       setThreadSessionId: (threadId: string, sessionId: string) => {
         set((state) => ({
           threads: state.threads.map((t) =>
@@ -154,7 +130,9 @@ export const useChatStore = create<ChatStore>()(
           threads: state.threads.map((t) =>
             t.id === threadId
               ? { ...t, messages: t.messages.map((m) =>
-                  m.id === messageId ? { ...m, pinned: !m.pinned } : m
+                  m.id === messageId
+                    ? { ...m, pinned: !m.pinned, pinnedAt: m.pinned ? m.pinnedAt : Date.now() }
+                    : m
                 ) }
               : t
           ),

@@ -1,24 +1,41 @@
+import logging
+from collections.abc import Iterator
 from elevenlabs.client import ElevenLabs
 from app.config import settings
 
-client = ElevenLabs(
-    api_key=settings.elevenlabs_api_key
-)
+logger = logging.getLogger(__name__)
 
-VOICE_ID = "EXAVITQu4vr4xnSDxMaL"
-MODEL_ID = "eleven_multilingual_v2"
+client = ElevenLabs(api_key=settings.elevenlabs_api_key)
 
 
-def synthesize_speech(text: str) -> bytes:
-    """Convert text to speech using ElevenLabs."""
+def _stream_speech_sync(text: str) -> Iterator[bytes]:
     audio = client.text_to_speech.convert(
-        voice_id=VOICE_ID,
-        model_id=MODEL_ID,
+        voice_id=settings.elevenlabs_voice_id,
+        model_id=settings.elevenlabs_model_id,
         text=text,
         output_format="mp3_44100_128",
     )
-
     if isinstance(audio, bytes):
-        return audio
+        if audio:
+            yield audio
+        return
 
-    return b"".join(audio)
+    for chunk in audio:
+        if chunk:
+            yield chunk
+
+
+def stream_speech(text: str) -> Iterator[bytes]:
+    """Stream ElevenLabs audio chunks without buffering the full response."""
+    logger.info("[TTS] Trying ElevenLabs")
+    yielded_audio = False
+    try:
+        for chunk in _stream_speech_sync(text):
+            yielded_audio = True
+            yield chunk
+    except Exception:
+        logger.exception("[TTS] ElevenLabs failed")
+        raise
+    if not yielded_audio:
+        raise ValueError("ElevenLabs returned empty audio")
+    logger.info("[TTS] ElevenLabs succeeded")

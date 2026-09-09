@@ -9,38 +9,47 @@ from app.config import settings
 
 
 class Database:
+    """Manages the PostgreSQL connection pool and all data access."""
 
-    def __init__(self, database_url: str):
+    def __init__(
+        self,
+        database_url: str,
+        pool_min_size: int = 1,
+        pool_max_size: int = 10,
+    ):
         self.database_url = database_url
+        self.pool_min_size = pool_min_size
+        self.pool_max_size = pool_max_size
         self.pool: asyncpg.Pool | None = None
 
-    # ========================================================
-    # DATABASE CONNECTION
-    # ========================================================
+    # ============================================================
+    # CONNECTION LIFECYCLE
+    # ============================================================
 
     async def connect(self) -> None:
+        """Create the PostgreSQL connection pool and database schema."""
 
         self.pool = await asyncpg.create_pool(
             self.database_url,
-            min_size=1,
-            max_size=10,
+            min_size=self.pool_min_size,
+            max_size=self.pool_max_size,
         )
 
         await self._create_schema()
 
     async def close(self) -> None:
+        """Close the PostgreSQL connection pool."""
 
         if self.pool is not None:
-
             await self.pool.close()
-
             self.pool = None
 
-    # ========================================================
-    # CREATE DATABASE TABLES
-    # ========================================================
+    # ============================================================
+    # DATABASE SCHEMA
+    # ============================================================
 
     async def _create_schema(self) -> None:
+        """Create the application database tables if they don't exist."""
 
         pool = self._require_pool()
 
@@ -63,14 +72,10 @@ class Database:
 
             CREATE TABLE IF NOT EXISTS conversations (
                 session_id TEXT PRIMARY KEY,
-                customer_id TEXT
-                    REFERENCES customers(customer_id),
-                context JSONB NOT NULL
-                    DEFAULT '{}'::jsonb,
-                created_at TIMESTAMPTZ NOT NULL
-                    DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL
-                    DEFAULT NOW()
+                customer_id TEXT REFERENCES customers(customer_id),
+                context JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
 
             CREATE TABLE IF NOT EXISTS messages (
@@ -80,8 +85,7 @@ class Database:
                     ON DELETE CASCADE,
                 role TEXT NOT NULL,
                 content TEXT NOT NULL,
-                timestamp TIMESTAMPTZ NOT NULL
-                    DEFAULT NOW()
+                timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
 
             CREATE TABLE IF NOT EXISTS leads (
@@ -90,8 +94,7 @@ class Database:
                 email TEXT NOT NULL,
                 company TEXT NOT NULL,
                 requirement TEXT NOT NULL,
-                status TEXT NOT NULL
-                    DEFAULT 'new'
+                status TEXT NOT NULL DEFAULT 'new'
             );
 
             CREATE TABLE IF NOT EXISTS consultations (
@@ -100,329 +103,148 @@ class Database:
                 contact TEXT NOT NULL,
                 preferred_time TEXT NOT NULL,
                 topic TEXT NOT NULL,
-                status TEXT NOT NULL
-                    DEFAULT 'requested'
+                status TEXT NOT NULL DEFAULT 'requested'
             );
 
             CREATE TABLE IF NOT EXISTS consultation_slots (
                 id BIGSERIAL PRIMARY KEY,
                 date TEXT NOT NULL,
                 time TEXT NOT NULL,
-                available BOOLEAN NOT NULL
-                    DEFAULT TRUE
+                available BOOLEAN NOT NULL DEFAULT TRUE
             );
 
-            CREATE TABLE IF NOT EXISTS services (
-                key TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                description TEXT NOT NULL
+            CREATE TABLE IF NOT EXISTS website_content (
+                id BIGSERIAL PRIMARY KEY,
+                url TEXT UNIQUE NOT NULL,
+                title TEXT,
+                content TEXT NOT NULL,
+                content_hash TEXT,
+                last_scraped_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
 
-            CREATE TABLE IF NOT EXISTS case_studies (
-                key TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                description TEXT NOT NULL
-            );
+            CREATE INDEX IF NOT EXISTS messages_session_id_timestamp_idx
+                ON messages (session_id, timestamp);
 
-            CREATE TABLE IF NOT EXISTS faqs (
-                key TEXT PRIMARY KEY,
-                topic TEXT NOT NULL,
-                answer TEXT NOT NULL
-            );
+            CREATE INDEX IF NOT EXISTS website_content_url_idx
+                ON website_content (url);
 
-            CREATE INDEX IF NOT EXISTS
-                messages_session_id_timestamp_idx
-            ON messages (
-                session_id,
-                timestamp
-            );
+            CREATE INDEX IF NOT EXISTS website_content_title_idx
+                ON website_content (title);
             """
         )
 
-        await self._seed_reference_data()
-
-    # ========================================================
-    # SEED REFERENCE DATA
-    # ========================================================
-
-    async def _seed_reference_data(self) -> None:
-
-        pool = self._require_pool()
-
-        await pool.execute(
-            """
-            INSERT INTO customers (
-                customer_id,
-                name,
-                phone
-            )
-            VALUES (
-                '12345',
-                'Anusha',
-                '+91 9876543210'
-            )
-            ON CONFLICT (customer_id)
-            DO NOTHING;
-
-            INSERT INTO appointments (
-                id,
-                customer_id,
-                date,
-                time,
-                status
-            )
-            VALUES (
-                'appointment-12345',
-                '12345',
-                '2026-08-28',
-                '15:00',
-                'scheduled'
-            )
-            ON CONFLICT (id)
-            DO NOTHING;
-
-            INSERT INTO consultation_slots (
-                date,
-                time,
-                available
-            )
-            SELECT *
-            FROM (
-                VALUES
-                    ('2026-08-28', '10:00', TRUE),
-                    ('2026-08-28', '15:00', TRUE),
-                    ('2026-08-29', '11:00', TRUE)
-            ) AS slots(
-                date,
-                time,
-                available
-            )
-            WHERE NOT EXISTS (
-                SELECT 1
-                FROM consultation_slots
-            );
-
-            INSERT INTO services (
-                key,
-                name,
-                description
-            )
-            VALUES
-                (
-                    'AI/ML',
-                    'AI/ML',
-                    'AI and machine learning solutions '
-                    'for business needs.'
-                ),
-                (
-                    'chatbots',
-                    'Chatbots',
-                    'Intelligent chatbot solutions for '
-                    'customer and business interactions.'
-                ),
-                (
-                    'SaaS development',
-                    'SaaS Development',
-                    'Scalable software-as-a-service '
-                    'application development.'
-                ),
-                (
-                    'enterprise applications',
-                    'Enterprise Applications',
-                    'Enterprise-grade applications '
-                    'designed for business operations.'
-                ),
-                (
-                    'cloud/migration',
-                    'Cloud / Migration',
-                    'Cloud solutions and migration support '
-                    'for modernizing applications and '
-                    'infrastructure.'
-                ),
-                (
-                    'DevOps',
-                    'DevOps',
-                    'DevOps solutions for development, '
-                    'deployment, automation, and operations.'
-                ),
-                (
-                    'IT consulting',
-                    'IT Consulting',
-                    'IT consulting services to help '
-                    'organizations plan and implement '
-                    'technology solutions.'
-                ),
-                (
-                    'enterprise architecture',
-                    'Enterprise Architecture',
-                    'Enterprise architecture solutions for '
-                    'designing scalable technology systems.'
-                )
-            ON CONFLICT (key)
-            DO NOTHING;
-
-            INSERT INTO case_studies (
-                key,
-                name,
-                description
-            )
-            VALUES
-                (
-                    'APPGM',
-                    'APPGM',
-                    'APPGM case study.'
-                ),
-                (
-                    'HEB',
-                    'HEB',
-                    'HEB case study.'
-                ),
-                (
-                    'WhyScience',
-                    'WhyScience',
-                    'WhyScience case study.'
-                )
-            ON CONFLICT (key)
-            DO NOTHING;
-
-            INSERT INTO faqs (
-                key,
-                topic,
-                answer
-            )
-            VALUES
-                (
-                    'iso 27001',
-                    'ISO 27001',
-                    'NetKathir''s ISO 27001 information '
-                    'should be provided from the company''s '
-                    'approved FAQ information.'
-                ),
-                (
-                    'founded',
-                    'Company founding year',
-                    'NetKathir was founded in 2015.'
-                ),
-                (
-                    'engagement process',
-                    'Engagement process',
-                    'NetKathir''s typical engagement process '
-                    'should follow the company''s approved '
-                    'engagement workflow.'
-                )
-            ON CONFLICT (key)
-            DO NOTHING;
-            """
-        )
-
-    # ========================================================
+    # ============================================================
     # CONVERSATION MANAGEMENT
-    # ========================================================
+    # ============================================================
 
-    async def ensure_conversation(
-        self,
-        session_id: str,
-    ) -> None:
+    async def ensure_conversation(self, session_id: str) -> None:
+        """Create a conversation row if it doesn't already exist."""
 
         pool = self._require_pool()
 
         await pool.execute(
             """
-            INSERT INTO conversations (
-                session_id
-            )
+            INSERT INTO conversations (session_id)
             VALUES ($1)
-            ON CONFLICT (session_id)
-            DO NOTHING
+            ON CONFLICT (session_id) DO NOTHING
             """,
             session_id,
         )
 
-    # ========================================================
-    # DELETE CONVERSATIONS OLDER THAN 30 DAYS
-    # ========================================================
+    async def cleanup_old_conversations(
+        self,
+        older_than_days: int | None = None,
+    ) -> None:
+        """Delete conversations that have not been updated recently."""
 
-    async def cleanup_old_conversations(self) -> None:
+        days = (
+            older_than_days
+            if older_than_days is not None
+            else settings.conversation_retention_days
+        )
 
         pool = self._require_pool()
 
         await pool.execute(
             """
             DELETE FROM conversations
-            WHERE updated_at < NOW() - INTERVAL '30 days'
-            """
+            WHERE updated_at < NOW() - ($1 || ' days')::interval
+            """,
+            str(days),
         )
 
-    # ========================================================
-    # GENERIC DATABASE METHODS
-    # ========================================================
+    # ============================================================
+    # GENERIC QUERY HELPERS
+    # ============================================================
 
     async def fetchrow(
         self,
         query: str,
         *args: Any,
     ) -> asyncpg.Record | None:
+        """Execute a query and return one row."""
 
-        return await self._require_pool().fetchrow(
-            query,
-            *args,
-        )
+        return await self._require_pool().fetchrow(query, *args)
 
     async def fetch(
         self,
         query: str,
         *args: Any,
     ) -> list[asyncpg.Record]:
+        """Execute a query and return all rows."""
 
-        return await self._require_pool().fetch(
-            query,
-            *args,
-        )
+        return await self._require_pool().fetch(query, *args)
 
     async def fetchval(
         self,
         query: str,
         *args: Any,
     ) -> Any:
+        """Execute a query and return a single value."""
 
-        return await self._require_pool().fetchval(
-            query,
-            *args,
-        )
+        return await self._require_pool().fetchval(query, *args)
 
     async def execute(
         self,
         query: str,
         *args: Any,
     ) -> str:
+        """Execute a database command."""
 
-        return await self._require_pool().execute(
-            query,
-            *args,
-        )
+        return await self._require_pool().execute(query, *args)
 
-    # ========================================================
-    # GET CONVERSATION MESSAGES
-    # ========================================================
+    # ============================================================
+    # MESSAGES
+    # ============================================================
 
     async def get_messages(
         self,
         session_id: str,
+        limit: int = 30,
     ) -> list[dict[str, Any]]:
+        """
+        Return recent messages for a session.
+
+        The limit prevents conversation history from growing
+        indefinitely inside the LLM request.
+        """
 
         pool = self._require_pool()
 
         rows = await pool.fetch(
             """
-            SELECT
-                id,
-                role,
-                content
-            FROM messages
-            WHERE session_id = $1
+            SELECT id, role, content
+            FROM (
+                SELECT id, role, content, timestamp
+                FROM messages
+                WHERE session_id = $1
+                ORDER BY timestamp DESC, id DESC
+                LIMIT $2
+            ) recent_messages
             ORDER BY timestamp, id
             """,
             session_id,
+            limit,
         )
 
         return [
@@ -433,39 +255,36 @@ class Database:
             for row in rows
         ]
 
-    # ========================================================
-    # SAVE CONVERSATION MESSAGES
-    # ========================================================
-
     async def add_messages(
         self,
         session_id: str,
         messages: Iterable[dict[str, Any]],
     ) -> None:
+        """Save user and assistant messages for a session."""
 
         pool = self._require_pool()
 
         async with pool.acquire() as connection:
-
             async with connection.transaction():
 
                 for message in messages:
 
+                    # Tool messages are not stored as normal chat messages.
                     if message.get("role") == "tool":
                         continue
 
+                    # Tool-call assistant messages are not stored as
+                    # normal conversation messages.
                     if (
                         message.get("role") == "assistant"
                         and message.get("tool_calls")
                     ):
                         continue
 
-                    message_id = str(uuid4())
+                    content = message.get("content") or ""
 
-                    content = (
-                        message.get("content")
-                        or ""
-                    )
+                    if not isinstance(content, str):
+                        content = json.dumps(content)
 
                     await connection.execute(
                         """
@@ -475,23 +294,13 @@ class Database:
                             role,
                             content
                         )
-                        VALUES (
-                            $1,
-                            $2,
-                            $3,
-                            $4
-                        )
-                        ON CONFLICT (id)
-                        DO NOTHING
+                        VALUES ($1, $2, $3, $4)
+                        ON CONFLICT (id) DO NOTHING
                         """,
-                        message_id,
+                        str(uuid4()),
                         session_id,
                         message["role"],
-                        (
-                            content
-                            if isinstance(content, str)
-                            else json.dumps(content)
-                        ),
+                        content,
                     )
 
                 await connection.execute(
@@ -503,14 +312,15 @@ class Database:
                     session_id,
                 )
 
-    # ========================================================
-    # GET CONTEXT
-    # ========================================================
+    # ============================================================
+    # CONVERSATION CONTEXT
+    # ============================================================
 
     async def get_context(
         self,
         session_id: str,
     ) -> dict[str, Any]:
+        """Return the stored context for a conversation."""
 
         pool = self._require_pool()
 
@@ -523,17 +333,20 @@ class Database:
             session_id,
         )
 
-        return dict(context or {})
+        if not context:
+            return {}
 
-    # ========================================================
-    # SAVE CONTEXT
-    # ========================================================
+        if isinstance(context, str):
+            return json.loads(context)
+
+        return dict(context)
 
     async def save_context(
         self,
         session_id: str,
         context: dict[str, Any],
     ) -> None:
+        """Overwrite the stored context for a conversation."""
 
         pool = self._require_pool()
 
@@ -549,21 +362,217 @@ class Database:
             json.dumps(context),
         )
 
-    # ========================================================
-    # REQUIRE DATABASE POOL
-    # ========================================================
+    # ============================================================
+    # WEBSITE CONTENT
+    # ============================================================
+
+    async def save_website_content(
+        self,
+        url: str,
+        title: str,
+        content: str,
+        content_hash: str,
+    ) -> None:
+        """
+        Save or update scraped website content.
+
+        The website is the source of truth for company information.
+        """
+
+        pool = self._require_pool()
+
+        await pool.execute(
+            """
+            INSERT INTO website_content (
+                url,
+                title,
+                content,
+                content_hash,
+                last_scraped_at
+            )
+            VALUES ($1, $2, $3, $4, NOW())
+
+            ON CONFLICT (url)
+            DO UPDATE SET
+                title = EXCLUDED.title,
+                content = EXCLUDED.content,
+                content_hash = EXCLUDED.content_hash,
+                last_scraped_at = NOW()
+            """,
+            url,
+            title,
+            content,
+            content_hash,
+        )
+
+    async def get_website_content(self) -> str:
+        """Return all scraped website content."""
+
+        pool = self._require_pool()
+
+        rows = await pool.fetch(
+            """
+            SELECT title, content
+            FROM website_content
+            ORDER BY url
+            """
+        )
+
+        return "\n\n".join(
+            f"## {row['title'] or 'Untitled'}\n{row['content']}"
+            for row in rows
+        )
+
+    async def search_website_content(
+        self,
+        query: str,
+        limit: int = 3,
+    ) -> list[dict[str, Any]]:
+        """
+        Search scraped website content using meaningful keywords.
+
+        Instead of requiring the complete user sentence to exist
+        inside the website, this method searches individual keywords.
+
+        Example:
+
+            User:
+            "Where is the company located?"
+
+        Search keywords:
+
+            company
+            located
+
+        Contact and About pages are given higher priority because
+        they commonly contain company information.
+        """
+
+        pool = self._require_pool()
+
+        query = query.strip().lower()
+
+        if not query:
+            return []
+
+        # Common question/filler words that do not help website search.
+        stop_words = {
+            "where",
+            "what",
+            "when",
+            "how",
+            "why",
+            "who",
+            "which",
+            "is",
+            "are",
+            "was",
+            "were",
+            "the",
+            "a",
+            "an",
+            "of",
+            "to",
+            "in",
+            "for",
+            "on",
+            "at",
+            "do",
+            "does",
+            "did",
+            "can",
+            "could",
+            "would",
+            "tell",
+            "me",
+            "please",
+            "you",
+            "your",
+            "about",
+        }
+
+        keywords = [
+            word.strip(".,?!:;()[]{}\"'")
+            for word in query.split()
+        ]
+
+        keywords = [
+            word
+            for word in keywords
+            if word
+            and word not in stop_words
+            and len(word) > 2
+        ]
+
+        if not keywords:
+            keywords = [query]
+
+        # PostgreSQL parameters start from $1.
+        conditions: list[str] = []
+        values: list[str] = []
+
+        for index, keyword in enumerate(keywords, start=1):
+            conditions.append(
+                f"""
+                (
+                    title ILIKE ${index}
+                    OR content ILIKE ${index}
+                )
+                """
+            )
+            values.append(f"%{keyword}%")
+
+        # LIMIT parameter comes after all keyword parameters.
+        limit_parameter = len(values) + 1
+        values.append(limit)
+
+        search_sql = f"""
+            SELECT
+                url,
+                title,
+                content
+            FROM website_content
+            WHERE {' OR '.join(conditions)}
+            ORDER BY
+                CASE
+                    WHEN url ILIKE '%contact%' THEN 0
+                    WHEN url ILIKE '%about%' THEN 1
+                    WHEN url ILIKE '%services%' THEN 2
+                    WHEN url ILIKE '%products%' THEN 3
+                    ELSE 4
+                END,
+                url
+            LIMIT ${limit_parameter}
+        """
+
+        rows = await pool.fetch(
+            search_sql,
+            *values,
+        )
+
+        return [dict(row) for row in rows]
+
+    # ============================================================
+    # INTERNAL
+    # ============================================================
 
     def _require_pool(self) -> asyncpg.Pool:
+        """Return the active database pool or raise an error."""
 
         if self.pool is None:
             raise RuntimeError(
-                "Database connection pool "
-                "is not initialized"
+                "Database connection pool is not initialized"
             )
 
         return self.pool
 
 
+# ============================================================
+# DATABASE INSTANCE
+# ============================================================
+
 database = Database(
-    settings.database_url
+    settings.database_url,
+    pool_min_size=settings.db_pool_min_size,
+    pool_max_size=settings.db_pool_max_size,
 )

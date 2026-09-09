@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Search, ChevronUp, ChevronDown, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -12,27 +12,26 @@ interface MessageSearchProps {
 
 export function MessageSearch({ isOpen, onClose, messages, onNavigateToMessage, isDarkMode = false }: MessageSearchProps) {
   const [query, setQuery] = useState('');
-  const [matches, setMatches] = useState<{ messageId: string; matchIndex: number }[]>([]);
   const [currentMatch, setCurrentMatch] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Search messages
-  useEffect(() => {
-    if (!query.trim()) {
-      setMatches([]);
-      setCurrentMatch(0);
-      return;
-    }
+  // Search results are derived state — compute them instead of storing them.
+  const matches = useMemo(() => {
+    if (!query.trim()) return [] as { messageId: string }[];
     const q = query.toLowerCase();
-    const results: { messageId: string; matchIndex: number }[] = [];
-    messages.forEach(msg => {
+    const results: { messageId: string }[] = [];
+    for (const msg of messages) {
       if (msg.content.toLowerCase().includes(q)) {
-        results.push({ messageId: msg.id, matchIndex: 0 });
+        results.push({ messageId: msg.id });
       }
-    });
-    setMatches(results);
-    setCurrentMatch(0);
+    }
+    return results;
   }, [query, messages]);
+
+  // Reset the active match whenever the query or the result set changes.
+  useEffect(() => {
+    setCurrentMatch(0);
+  }, [query, matches]);
 
   // Focus input when opened
   useEffect(() => {
@@ -40,7 +39,6 @@ export function MessageSearch({ isOpen, onClose, messages, onNavigateToMessage, 
       setTimeout(() => inputRef.current?.focus(), 100);
     } else {
       setQuery('');
-      setMatches([]);
       setCurrentMatch(0);
     }
   }, [isOpen]);
@@ -125,15 +123,5 @@ export function MessageSearch({ isOpen, onClose, messages, onNavigateToMessage, 
         <X className="w-3.5 h-3.5" />
       </button>
     </div>
-  );
-}
-
-export function highlightText(text: string, query: string): React.ReactNode {
-  if (!query.trim()) return text;
-  const parts = text.split(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'));
-  return parts.map((part, i) =>
-    part.toLowerCase() === query.toLowerCase()
-      ? <mark key={i} className="bg-yellow-200 text-yellow-900 rounded px-0.5 dark:bg-yellow-600/40 dark:text-yellow-200">{part}</mark>
-      : part
   );
 }
