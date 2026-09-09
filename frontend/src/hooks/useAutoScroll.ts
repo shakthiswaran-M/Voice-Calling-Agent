@@ -151,16 +151,6 @@ export function useAutoScroll({
     trackingRef.current.isAtBottom = true;
     setIsScrolledUp(false);
     setShowScrollButton(false);
-<<<<<<< HEAD
-    // Defer scroll to after React renders the new message in the DOM.
-    // addMessage() updates Zustand state synchronously, but the DOM
-    // commit happens asynchronously. Without this rAF, scrollToBottom
-    // reads the old scrollHeight (before the new message exists).
-    requestAnimationFrame(() => {
-      scrollToBottom(true);
-    });
-  }, [scrollToBottom]);
-=======
   }, []);
 
   // ── Re-check after scrolling ──
@@ -190,7 +180,6 @@ export function useAutoScroll({
     };
     settleTimerRef.current = setTimeout(check, 60);
   }, [checkIsAtBottom, scrollToBottom]);
->>>>>>> dev
 
   // ── IntersectionObserver: track which message is visible ──
   useEffect(() => {
@@ -338,14 +327,6 @@ export function useAutoScroll({
     if (trackingRef.current.isRestoringScroll) return;
 
     requestAnimationFrame(() => {
-<<<<<<< HEAD
-      // Use tracked state OR DOM state — the tracked state accounts for
-      // container height changes (e.g. typing indicator appearing/disappearing)
-      // that don't fire scroll events. Without this, a bot response arriving
-      // right after the typing indicator disappears would see checkIsAtBottom()
-      // return false (because the indicator added height) and fail to scroll.
-      const atBottom = trackingRef.current.isAtBottom || checkIsAtBottom();
-=======
       // A programmatic scroll (e.g. the one started by the send) is still
       // animating — keep it pointed at the newest bottom instead of judging
       // "at bottom" mid-flight and wrongly showing the scroll button.
@@ -356,7 +337,6 @@ export function useAutoScroll({
       }
 
       const atBottom = checkIsAtBottom();
->>>>>>> dev
       trackingRef.current.isAtBottom = atBottom;
       setIsScrolledUp(!atBottom);
       // While the user is following the tail (they just sent and haven't
