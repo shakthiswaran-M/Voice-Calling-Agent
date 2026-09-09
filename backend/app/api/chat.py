@@ -206,7 +206,7 @@ async def chat(req: ChatRequest):
 # {"type": "done", "session_id": "..."}  — stream complete
 
 from app.agent.prompts import AGENT_INSTRUCTIONS, SYSTEM_PROMPT
-from app.agent.business_info import BEHAVIOR_RULES
+# from app.agent.business_info import BEHAVIOR_RULES
 
 
 async def _build_messages(message: str, history: list, context_message: str) -> list:
@@ -217,7 +217,7 @@ async def _build_messages(message: str, history: list, context_message: str) -> 
             "content": (
                 f"{SYSTEM_PROMPT}\n\n"
                 f"{AGENT_INSTRUCTIONS}\n\n"
-                f"Behavior rules:\n{BEHAVIOR_RULES}"
+                # f"Behavior rules:\n{BEHAVIOR_RULES}"
             ),
         }
     ]
@@ -233,14 +233,38 @@ async def _run_tool_loop(messages: list, current_turn: list) -> str:
     import inspect as _inspect
     import os as _os
     from app.config import settings as _settings
+    initial_message_count = len(messages)
 
-    for _ in range(3):
-        completion = await client.chat.completions.create(
-            model=_settings.llm_model,
-            messages=messages,
-            tools=TOOL_SCHEMAS,
-            tool_choice="auto",
-        )
+    for round_number in range(3):
+        request = {
+            "model": _settings.llm_model,
+            "messages": messages,
+        }
+        if round_number < 2:
+            request.update(
+                tools=TOOL_SCHEMAS,
+                tool_choice="auto",
+            )
+        else:
+            tool_results = [
+                item["content"]
+                for item in messages[initial_message_count:]
+                if item.get("role") == "tool"
+            ]
+            request["messages"] = messages[:initial_message_count] + [
+                {
+                    "role": "system",
+                    "content": (
+                        "The following website search results are "
+                        "authoritative. Answer the user's question "
+                        "directly from them. Do not claim the "
+                        "information is unavailable and do not call any "
+                        "tools.\n"
+                        + "\n".join(tool_results)
+                    ),
+                }
+            ]
+        completion = await client.chat.completions.create(**request)
         assistant_message = completion.choices[0].message
         tool_calls = assistant_message.tool_calls or []
         assistant_data = assistant_message.model_dump(exclude_none=True)

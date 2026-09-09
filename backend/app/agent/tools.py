@@ -135,7 +135,7 @@ async def search_website_content(query: str) -> dict:
             {
                 "title": row["title"],
                 "url": row["url"],
-                "content": row["content"][:1200],
+                "content": row["content"][:3000],
             }
             for row in results
         ]

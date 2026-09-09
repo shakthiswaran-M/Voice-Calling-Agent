@@ -337,7 +337,7 @@ export function SpeechToSpeechMode({
 
     const timer = setTimeout(() => {
       if (!('speechSynthesis' in window)) return;
-      const welcomeText = 'Welcome to NetKathir. How can I help you?';
+      const welcomeText = 'Welcome to NetKathir. How can I help you Today?';
       const turn = turnIdRef.current;
       setState('speaking');
       speechSynthesisService.speak(welcomeText, {
