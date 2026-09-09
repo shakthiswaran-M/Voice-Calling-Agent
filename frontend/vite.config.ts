@@ -1,7 +1,7 @@
 // vite.config.ts
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
-import path from 'path';
+
 
 // jsPDF ships an optional DOM-capture `.html()` plugin whose bundled code
 // contains `import('html2canvas')`. This app's PDF export is pure jsPDF text
@@ -29,7 +29,7 @@ export default defineConfig({
   plugins: [react(), neutralizeJspdfDomCapture()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': new URL('./src', import.meta.url).pathname,
     },
   },
   optimizeDeps: {

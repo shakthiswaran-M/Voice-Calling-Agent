@@ -1,12 +1,14 @@
 from uuid import uuid4
+import json
 import re
 import logging
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.database import database
-from app.providers.llm import generate_response
+from app.providers.llm import generate_response, clean_response, client, TOOL_SCHEMAS, AVAILABLE_TOOLS
 
 
 router = APIRouter()
@@ -195,4 +197,147 @@ async def chat(req: ChatRequest):
     return ChatResponse(
         reply=reply,
         session_id=session_id,
+    )
+
+
+# ── Streaming chat endpoint ──
+# Returns Server-Sent Events: each "data:" line is a JSON object.
+# {"type": "chunk", "text": "..."}   — incremental LLM text
+# {"type": "done", "session_id": "..."}  — stream complete
+
+from app.agent.prompts import AGENT_INSTRUCTIONS, SYSTEM_PROMPT
+from app.agent.business_info import BEHAVIOR_RULES
+
+
+async def _build_messages(message: str, history: list, context_message: str) -> list:
+    """Build the messages array for the LLM (shared by streaming and non-streaming)."""
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                f"{SYSTEM_PROMPT}\n\n"
+                f"{AGENT_INSTRUCTIONS}\n\n"
+                f"Behavior rules:\n{BEHAVIOR_RULES}"
+            ),
+        }
+    ]
+    if context_message:
+        messages.append({"role": "system", "content": context_message})
+    messages.extend(history)
+    messages.append({"role": "user", "content": message})
+    return messages
+
+
+async def _run_tool_loop(messages: list, current_turn: list) -> str:
+    """Run up to 3 rounds of tool-calling. Returns the final reply text."""
+    import inspect as _inspect
+    import os as _os
+    from app.config import settings as _settings
+
+    for _ in range(3):
+        completion = await client.chat.completions.create(
+            model=_settings.llm_model,
+            messages=messages,
+            tools=TOOL_SCHEMAS,
+            tool_choice="auto",
+        )
+        assistant_message = completion.choices[0].message
+        tool_calls = assistant_message.tool_calls or []
+        assistant_data = assistant_message.model_dump(exclude_none=True)
+        messages.append(assistant_data)
+        current_turn.append(assistant_data)
+
+        if not tool_calls:
+            return assistant_message.content or ""
+
+        for tool_call in tool_calls:
+            tool_name = tool_call.function.name
+            tool = AVAILABLE_TOOLS.get(tool_name)
+            if tool is None:
+                continue
+            try:
+                arguments = json.loads(tool_call.function.arguments or "{}")
+                result = tool(**arguments)
+                if _inspect.isawaitable(result):
+                    result = await result
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                result = {"error": f"Tool could not be executed: {exc}"}
+            tool_message = {
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "name": tool_name,
+                "content": json.dumps(result),
+            }
+            messages.append(tool_message)
+            current_turn.append(tool_message)
+    return ""
+
+
+async def _stream_chat_generator(message: str, session_id: str):
+    """Yield SSE lines for the streaming chat endpoint."""
+    from app.config import settings
+
+    await database.ensure_conversation(session_id)
+    history = await database.get_messages(session_id)
+    context = await database.get_context(session_id)
+    context = update_context(context, message)
+    context_message = build_context_message(context)
+
+    messages = await _build_messages(message, history, context_message)
+    current_turn = [messages[-1]]
+
+    try:
+        # Phase 1: tool calling (non-streaming) — typically 0-2 rounds
+        reply_text = await _run_tool_loop(messages, current_turn)
+
+        # Phase 2: stream the final text response
+        if not reply_text:
+            # Model didn't produce text in tool loop — make a final streaming call
+            completion = await client.chat.completions.create(
+                model=settings.llm_model,
+                messages=messages,
+                tools=TOOL_SCHEMAS,
+                tool_choice="none",
+                stream=True,
+            )
+            reply_text = ""
+            async for chunk in completion:
+                delta = chunk.choices[0].delta if chunk.choices else None
+                if delta and delta.content:
+                    reply_text += delta.content
+                    yield f"data: {json.dumps({'type': 'chunk', 'text': delta.content})}\n\n"
+            reply_text = clean_response(reply_text)
+        else:
+            # Text was produced during tool loop — stream it as a single chunk
+            reply_text = clean_response(reply_text)
+            yield f"data: {json.dumps({'type': 'chunk', 'text': reply_text})}\n\n"
+
+    except Exception as exc:
+        logger.exception("Streaming LLM request failed for session %s", session_id)
+        error_msg = (
+            "The language model service is unavailable. "
+            "Check LLM_API_KEY and try again."
+        )
+        yield f"data: {json.dumps({'type': 'error', 'text': error_msg})}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
+        return
+
+    # Save conversation turn
+    await database.add_messages(session_id, current_turn)
+    await database.save_context(session_id, context)
+
+    yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
+
+
+@router.post("/api/chat/stream")
+async def chat_stream(req: ChatRequest):
+    session_id = req.session_id or str(uuid4())
+    return StreamingResponse(
+        _stream_chat_generator(req.message, session_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
