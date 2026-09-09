@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Mic, MicOff, ArrowUp } from 'lucide-react';
+import { Mic, MicOff, ArrowUp, AudioWaveform } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 interface ChatInputProps {
@@ -8,6 +8,7 @@ interface ChatInputProps {
   isCentered?: boolean;
   isDarkMode?: boolean;
   onVoiceToggle?: () => void;
+  onSpeechToSpeechToggle?: () => void;
   isRecording?: boolean;
   replyToMessage?: string | null;
   onClearReply?: () => void;
@@ -19,6 +20,7 @@ export function ChatInput({
   isCentered = false,
   isDarkMode = false,
   onVoiceToggle,
+  onSpeechToSpeechToggle,
   isRecording = false,
   replyToMessage = null,
   onClearReply,
@@ -160,6 +162,22 @@ export function ChatInput({
               )}
             </button>
 
+            {onSpeechToSpeechToggle && (
+              <button
+                onClick={onSpeechToSpeechToggle}
+                disabled={disabled}
+                aria-label="Open speech to speech"
+                title="Speech to speech"
+                className={cn(
+                  'p-2 sm:p-2.5 rounded-xl transition-all duration-300 active:scale-90',
+                  isDarkMode ? 'text-white/40 hover:text-green-400 hover:bg-green-500/10' : 'text-midnight-300 hover:text-green-600 hover:bg-green-50',
+                  disabled && 'opacity-40 cursor-not-allowed'
+                )}
+              >
+                <AudioWaveform className="w-4 h-4" />
+              </button>
+            )}
+
             <button
               onClick={handleSend}
               disabled={!hasContent || disabled}
@@ -262,6 +280,22 @@ export function ChatInput({
               <Mic className="w-4 h-4" />
             )}
           </button>
+
+          {onSpeechToSpeechToggle && (
+            <button
+              onClick={onSpeechToSpeechToggle}
+              disabled={disabled}
+              aria-label="Open speech to speech"
+              title="Speech to speech"
+              className={cn(
+                'p-2 sm:p-2.5 rounded-xl transition-all duration-300 active:scale-90',
+                isDarkMode ? 'text-white/40 hover:text-green-400 hover:bg-green-500/10' : 'text-midnight-300 hover:text-green-600 hover:bg-green-50',
+                disabled && 'opacity-40 cursor-not-allowed'
+              )}
+            >
+              <AudioWaveform className="w-4 h-4" />
+            </button>
+          )}
 
           <button
             onClick={handleSend}

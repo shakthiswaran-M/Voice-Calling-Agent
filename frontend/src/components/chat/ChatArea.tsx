@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useChatStore } from '../../store/useChatStore';
 import { MessageBubble, TtsState } from './MessageBubble';
 import { ChatInput } from './ChatInput';
+import { SpeechToSpeechMode } from './SpeechToSpeechMode';
 import { MessageSearch } from './MessageSearch';
 import { ContextMenu, Copy, Reply, Pin, Forward } from './ContextMenu';
 import { useAutoScroll } from '../../hooks/useAutoScroll';
@@ -66,6 +67,7 @@ export function ChatArea() {
   // ── TTS ──
   const [isSending, setIsSending] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [speechToSpeechOpen, setSpeechToSpeechOpen] = useState(false);
   const [ttsMsgId, setTtsMsgId] = useState<string | null>(null);
   const [ttsState, setTtsState] = useState<TtsState>('idle');
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -277,6 +279,7 @@ export function ChatArea() {
       addMessage(threadId, { role: 'bot', content: message });
     } finally { setIsSending(false); }
   };
+
 
   const handleStartConversation = async () => {
     if (isRecording) { mediaRecorderRef.current?.stop(); setIsRecording(false); return; }
@@ -615,6 +618,7 @@ export function ChatArea() {
               disabled={!activeThreadId || isSending}
               isDarkMode={isDarkMode}
               onVoiceToggle={handleStartConversation}
+              onSpeechToSpeechToggle={() => setSpeechToSpeechOpen(true)}
               isRecording={isRecording}
               replyToMessage={replyToMessage?.content || null}
               onClearReply={activeThreadId ? () => setReplyTo(activeThreadId, null) : undefined}
@@ -647,10 +651,17 @@ export function ChatArea() {
             </p>
           </div>
           <div className="shrink-0 safe-area-bottom">
-            <ChatInput onSend={handleSendMessage} disabled={!activeThreadId || isSending} isCentered isDarkMode={isDarkMode} onVoiceToggle={handleStartConversation} isRecording={isRecording} />
+            <ChatInput onSend={handleSendMessage} disabled={!activeThreadId || isSending} isCentered isDarkMode={isDarkMode} onVoiceToggle={handleStartConversation} onSpeechToSpeechToggle={() => setSpeechToSpeechOpen(true)} isRecording={isRecording} />
           </div>
         </div>
       )}
+
+      <SpeechToSpeechMode
+        isOpen={speechToSpeechOpen}
+        disabled={!activeThreadId || isSending || isRecording}
+        isDarkMode={isDarkMode}
+        onClose={() => setSpeechToSpeechOpen(false)}
+      />
 
       {/* Context Menu */}
       {contextMenu && (
