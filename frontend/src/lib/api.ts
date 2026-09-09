@@ -124,3 +124,74 @@ export async function synthesizeSpeech(text: string, signal?: AbortSignal): Prom
     NETWORK_ERROR_MESSAGES.tts
   );
 }
+
+// ── Streaming chat ──
+
+export interface StreamChunk {
+  type: 'chunk' | 'done' | 'error';
+  text?: string;
+  session_id?: string;
+}
+
+/**
+ * Stream a chat message via SSE. Calls `onChunk` for each incremental
+ * text piece and resolves with the final session_id when the stream ends.
+ */
+export async function sendChatMessageStream(
+  message: string,
+  onChunk: (text: string) => void,
+  sessionId?: string | null,
+): Promise<string> {
+  const res = await fetch(`${API_BASE_URL}/api/chat/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, session_id: sessionId ?? null }),
+  });
+
+  if (!res.ok) {
+    let detail = `Request failed (${res.status})`;
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (body?.detail) detail = body.detail;
+    } catch { /* ignore */ }
+    throw new ApiError(detail, res.status);
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) throw new ApiError('No response body');
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finalSessionId = sessionId || '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    // Parse SSE lines
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const jsonStr = line.slice(6).trim();
+      if (!jsonStr) continue;
+      try {
+        const event = JSON.parse(jsonStr) as StreamChunk;
+        if (event.type === 'chunk' && event.text) {
+          onChunk(event.text);
+        } else if (event.type === 'done') {
+          finalSessionId = event.session_id || finalSessionId;
+        } else if (event.type === 'error') {
+          throw new ApiError(event.text || 'Stream error');
+        }
+      } catch (e) {
+        if (e instanceof ApiError) throw e;
+        // ignore malformed JSON lines
+      }
+    }
+  }
+
+  return finalSessionId;
+}

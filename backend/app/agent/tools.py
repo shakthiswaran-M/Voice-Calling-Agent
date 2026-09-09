@@ -26,32 +26,7 @@ async def get_appointment(customer_id: str) -> dict:
     return dict(appointment)
 
 
-async def capture_lead(name: str, email: str, company: str, requirement: str) -> dict:
-    """Capture an inbound NetKathir customer inquiry."""
-    if not name.strip():
-        return {"error": "Name is required."}
-    if not email.strip():
-        return {"error": "Email is required."}
-    if not company.strip():
-        return {"error": "Company is required."}
-    if not requirement.strip():
-        return {"error": "Requirement is required."}
 
-    lead_id = str(uuid4())
-    lead = {
-        "lead_id": lead_id,
-        "name": name.strip(),
-        "email": email.strip(),
-        "company": company.strip(),
-        "requirement": requirement.strip(),
-        "status": "new",
-    }
-    await database.execute(
-        """INSERT INTO leads (lead_id, name, email, company, requirement, status)
-        VALUES ($1, $2, $3, $4, $5, $6)""",
-        lead_id, lead["name"], lead["email"], lead["company"], lead["requirement"], lead["status"],
-    )
-    return {"success": True, "message": "Lead captured successfully.", "lead": lead}
 
 
 async def get_service_info(service_name: str) -> dict:
@@ -160,7 +135,7 @@ async def search_website_content(query: str) -> dict:
             {
                 "title": row["title"],
                 "url": row["url"],
-                "content": row["content"][:1200],
+                "content": row["content"][:3000],
             }
             for row in results
         ]
@@ -182,16 +157,7 @@ TOOL_SCHEMAS = [
             "customer_id": {"type": "string", "description": "The customer's unique ID."}
         }, "required": ["customer_id"]},
     }},
-    {"type": "function", "function": {
-        "name": "capture_lead",
-        "description": "Capture an inbound NetKathir inquiry when a visitor wants to get started or discuss a project.",
-        "parameters": {"type": "object", "properties": {
-            "name": {"type": "string", "description": "The visitor's full name."},
-            "email": {"type": "string", "description": "The visitor's email address."},
-            "company": {"type": "string", "description": "The visitor's company name."},
-            "requirement": {"type": "string", "description": "The visitor's project requirement."},
-        }, "required": ["name", "email", "company", "requirement"]},
-    }},
+    
     {"type": "function", "function": {
         "name": "get_service_info",
         "description": "Get accurate structured information about a NetKathir service.",
@@ -247,7 +213,6 @@ TOOL_SCHEMAS = [
 AVAILABLE_TOOLS = {
     "get_customer": get_customer,
     "get_appointment": get_appointment,
-    "capture_lead": capture_lead,
     "get_service_info": get_service_info,
     "schedule_consultation": schedule_consultation,
     "check_consultation_availability": check_consultation_availability,

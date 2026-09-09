@@ -32,6 +32,10 @@ Keep responses easy to understand when spoken aloud.
 Answer the specific question asked by the customer.
 
 Do not unnecessarily repeat the complete company introduction.
+
+For questions about the company, its location, office address, contact details,
+services, products, projects, or website, always call search_website_content
+before answering. Use the returned website content as the source of truth.
 """
 
 

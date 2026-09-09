@@ -15,12 +15,9 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-<<<<<<< HEAD
     // "ignoreDeprecations": "6.0",
-=======
->>>>>>> dev
-    "baseUrl": ".",
     "paths": { "@/*": ["./src/*"] }
+    // "baseUrl": ".",
   },
   "include": ["src"],
   "references": [{ "path": "./tsconfig.node.json" }]

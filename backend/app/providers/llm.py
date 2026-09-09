@@ -6,7 +6,7 @@ import re
 
 from openai import AsyncOpenAI
 
-from app.agent.business_info import BEHAVIOR_RULES
+
 from app.agent.prompts import AGENT_INSTRUCTIONS, SYSTEM_PROMPT
 from app.agent.tools import AVAILABLE_TOOLS, TOOL_SCHEMAS
 from app.config import settings
@@ -60,7 +60,7 @@ async def generate_response(
             "content": (
                 f"{SYSTEM_PROMPT}\n\n"
                 f"{AGENT_INSTRUCTIONS}\n\n"
-                f"Behavior rules:\n{BEHAVIOR_RULES}"
+                
             ),
         }
     ]
@@ -86,19 +86,45 @@ async def generate_response(
 
     # Store only the current interaction
     current_turn = [messages[-1]]
+    initial_message_count = len(messages)
 
     reply = ""
 
     try:
         # Allow up to 3 tool-calling rounds
-        for _ in range(3):
+        for round_number in range(3):
 
-            completion = await client.chat.completions.create(
-                model=settings.llm_model,
-                messages=messages,
-                tools=TOOL_SCHEMAS,
-                tool_choice="auto",
-            )
+            request = {
+                "model": settings.llm_model,
+                "messages": messages,
+            }
+
+            if round_number < 2:
+                request.update(
+                    tools=TOOL_SCHEMAS,
+                    tool_choice="auto",
+                )
+            else:
+                tool_results = [
+                    item["content"]
+                    for item in messages[initial_message_count:]
+                    if item.get("role") == "tool"
+                ]
+                request["messages"] = messages[:initial_message_count] + [
+                    {
+                        "role": "system",
+                        "content": (
+                            "The following website search results are "
+                            "authoritative. Answer the user's question "
+                            "directly from them. Do not claim the "
+                            "information is unavailable and do not call "
+                            "any tools.\n"
+                            + "\n".join(tool_results)
+                        ),
+                    }
+                ]
+
+            completion = await client.chat.completions.create(**request)
 
             assistant_message = completion.choices[0].message
 
@@ -169,27 +195,6 @@ async def generate_response(
 
                 messages.append(tool_message)
                 current_turn.append(tool_message)
-
-        else:
-
-            # If tool loop reaches maximum attempts,
-            # force the model to give a final answer
-            completion = await client.chat.completions.create(
-                model=settings.llm_model,
-                messages=messages,
-                tools=TOOL_SCHEMAS,
-                tool_choice="none",
-            )
-
-            assistant_message = completion.choices[0].message
-
-            reply = assistant_message.content or ""
-
-            current_turn.append(
-                assistant_message.model_dump(
-                    exclude_none=True
-                )
-            )
 
     except Exception:
         logger.exception("LLM request failed")
