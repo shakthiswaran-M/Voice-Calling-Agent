@@ -34,7 +34,7 @@ async def startup() -> None:
     asyncio.create_task(scrape_and_save())
 
     # Then run automatically every 24 hours
-    scheduler.add_job(scrape_and_save, "interval", hours=24)
+    scheduler.add_job(scrape_and_save, "interval", days=30)
     scheduler.start()
 
 

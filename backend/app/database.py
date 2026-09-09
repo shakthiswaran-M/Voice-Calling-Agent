@@ -88,15 +88,7 @@ class Database:
                 timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
 
-            CREATE TABLE IF NOT EXISTS leads (
-                lead_id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                email TEXT NOT NULL,
-                company TEXT NOT NULL,
-                requirement TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'new'
-            );
-
+            
             CREATE TABLE IF NOT EXISTS consultations (
                 consultation_id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
