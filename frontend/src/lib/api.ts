@@ -6,7 +6,7 @@
 
 export const API_BASE_URL =
   (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ||
-  'http://localhost:8000';
+  `${window.location.protocol}//${window.location.hostname}:8000`;
 
 const ENDPOINTS = {
   chat: '/api/chat',
@@ -33,6 +33,11 @@ export class ApiError extends Error {
 export interface ChatResponse {
   reply: string;
   session_id: string;
+}
+
+export interface SharedConversation {
+  session_id: string;
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
 }
 
 interface SttResponse {
@@ -194,4 +199,14 @@ export async function sendChatMessageStream(
   }
 
   return finalSessionId;
+}
+
+/** Load a conversation exposed through a public share link. */
+export async function getSharedConversation(sessionId: string): Promise<SharedConversation> {
+  const res = await request(
+    `${API_BASE_URL}/api/share/${encodeURIComponent(sessionId)}`,
+    { method: 'GET' },
+    'Could not reach the backend for this shared conversation.',
+  );
+  return (await res.json()) as SharedConversation;
 }

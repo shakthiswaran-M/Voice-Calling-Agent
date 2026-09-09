@@ -15,7 +15,6 @@ app = FastAPI(title="AI Voice Calling Agent")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins.split(","),
->>>>>>>>> Temporary merge branch 2
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

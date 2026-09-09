@@ -47,12 +47,12 @@ export async function copyTextToClipboard(text: string): Promise<void> {
 }
 
 /** Public share URL for a thread (used by the share modal in both nav + chat). */
-export function getThreadShareUrl(threadId: string): string {
-  return `${window.location.origin}/share/${threadId}`;
+export function getThreadShareUrl(sessionId: string): string {
+  return `${window.location.origin}/share/${encodeURIComponent(sessionId)}`;
 }
 
 /**
  * Gap (ms) after which two consecutive messages get a centered date/time
  * separator — the same rule in the chat UI and the PDF export.
  */
-export const TIMELINE_GAP_MS = 5 * 60 * 1000;
+export const TIMELINE_GAP_MS = 5 * 60 * 1000;

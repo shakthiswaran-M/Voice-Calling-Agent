@@ -677,7 +677,7 @@ export function ChatArea() {
       {/* Share Modal */}
       {shareThreadId && (
         <ShareModal
-          threadId={shareThreadId}
+          sessionId={threads.find((t) => t.id === shareThreadId)?.sessionId}
           threadTitle={threads.find((t) => t.id === shareThreadId)?.title || ''}
           isDarkMode={isDarkMode}
           onClose={() => setShareThreadId(null)}

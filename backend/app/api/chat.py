@@ -25,6 +25,27 @@ class ChatResponse(BaseModel):
     session_id: str
 
 
+class SharedMessage(BaseModel):
+    role: str
+    content: str
+
+
+class SharedConversationResponse(BaseModel):
+    session_id: str
+    messages: list[SharedMessage]
+
+
+@router.get(
+    "/api/share/{session_id}",
+    response_model=SharedConversationResponse,
+)
+async def shared_conversation(session_id: str):
+    messages = await database.get_shared_conversation(session_id)
+    if messages is None:
+        raise HTTPException(status_code=404, detail="Shared conversation not found.")
+    return SharedConversationResponse(session_id=session_id, messages=messages)
+
+
 def build_context_message(context: dict) -> str:
     """Converts stored context into information supplied to the LLM."""
 

@@ -10,13 +10,13 @@ import { cn } from '../../lib/utils';
 import { copyTextToClipboard, getThreadShareUrl } from '../../lib/utils';
 
 interface ShareModalProps {
-  threadId: string;
+  sessionId?: string;
   threadTitle: string;
   isDarkMode?: boolean;
   onClose: () => void;
 }
 
-export function ShareModal({ threadId, threadTitle, isDarkMode = false, onClose }: ShareModalProps) {
+export function ShareModal({ sessionId, threadTitle, isDarkMode = false, onClose }: ShareModalProps) {
   const [copyLinkState, setCopyLinkState] = useState<'idle' | 'copied'>('idle');
 
   // Close on Escape
@@ -29,20 +29,22 @@ export function ShareModal({ threadId, threadTitle, isDarkMode = false, onClose 
   }, [onClose]);
 
   const handleCopyShareLink = useCallback(async () => {
+    if (!sessionId) return;
     try {
-      await copyTextToClipboard(getThreadShareUrl(threadId));
+      await copyTextToClipboard(getThreadShareUrl(sessionId));
       setCopyLinkState('copied');
       setTimeout(() => setCopyLinkState('idle'), 2500);
     } catch {
       // Clipboard unavailable — leave the modal open; the link is visible in the UI.
     }
-  }, [threadId]);
+  }, [sessionId]);
 
   const handleWhatsAppShare = useCallback(() => {
-    const url = getThreadShareUrl(threadId);
+    if (!sessionId) return;
+    const url = getThreadShareUrl(sessionId);
     const text = `Check out this conversation: ${threadTitle}\n${url}`;
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
-  }, [threadId, threadTitle]);
+  }, [sessionId, threadTitle]);
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center px-4" onClick={onClose}>
@@ -75,6 +77,7 @@ export function ShareModal({ threadId, threadTitle, isDarkMode = false, onClose 
             {/* WhatsApp */}
             <button
               onClick={handleWhatsAppShare}
+              disabled={!sessionId}
               className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-xs font-semibold text-white bg-[#25D366] hover:bg-[#20BD5C] transition-all duration-200 active:scale-[0.97] hover:shadow-lg hover:shadow-[#25D366]/20"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -86,6 +89,7 @@ export function ShareModal({ threadId, threadTitle, isDarkMode = false, onClose 
             {/* Copy Link */}
             <button
               onClick={handleCopyShareLink}
+              disabled={!sessionId}
               className={cn(
                 'flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-xs font-semibold transition-all duration-200 active:scale-[0.97]',
                 copyLinkState === 'copied'
@@ -96,7 +100,7 @@ export function ShareModal({ threadId, threadTitle, isDarkMode = false, onClose 
               {copyLinkState === 'copied' ? (
                 <><Check className="w-4 h-4" /> Link copied</>
               ) : (
-                <><Share2 className="w-4 h-4" /> Copy link</>
+                <><Share2 className="w-4 h-4" /> {sessionId ? 'Copy link' : 'Send a message first'}</>
               )}
             </button>
           </div>

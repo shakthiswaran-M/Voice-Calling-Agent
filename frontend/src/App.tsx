@@ -5,8 +5,13 @@ import { ThreadNav } from './components/chat/ThreadNav';
 import { ChatArea } from './components/chat/ChatArea';
 import { useChatStore } from './store/useChatStore';
 import { cn } from './lib/utils';
+import { SharedConversationPage } from './components/chat/SharedConversationPage';
 
 function App() {
+  if (window.location.pathname.startsWith('/share/')) {
+    return <SharedConversationPage sessionId={decodeURIComponent(window.location.pathname.slice('/share/'.length))} />;
+  }
+
   const { isDarkMode, toggleSidebar, createThread } = useChatStore();
 
   useEffect(() => {

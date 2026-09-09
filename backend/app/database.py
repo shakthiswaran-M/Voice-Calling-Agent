@@ -247,6 +247,37 @@ class Database:
             for row in rows
         ]
 
+    async def get_shared_conversation(
+        self,
+        session_id: str,
+    ) -> list[dict[str, str]] | None:
+        """Return a conversation's messages, or None when it does not exist."""
+
+        pool = self._require_pool()
+        exists = await pool.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM conversations WHERE session_id = $1)",
+            session_id,
+        )
+        if not exists:
+            return None
+
+        rows = await pool.fetch(
+            """
+            SELECT role, content
+            FROM messages
+            WHERE session_id = $1
+            ORDER BY timestamp, id
+            """,
+            session_id,
+        )
+        return [
+            {
+                "role": row["role"],
+                "content": row["content"],
+            }
+            for row in rows
+        ]
+
     async def add_messages(
         self,
         session_id: str,
