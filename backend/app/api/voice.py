@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Iterator
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -28,8 +29,25 @@ class TTSRequest(BaseModel):
 
 @router.post("/api/tts-test")
 async def tts_test(req: TTSRequest):
+    audio_stream = stream_speech(req.text)
+    try:
+        first_chunk = next(audio_stream)
+    except Exception as exc:
+        logger.warning("ElevenLabs TTS unavailable: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="ElevenLabs TTS is unavailable. The browser can use speech synthesis fallback.",
+        ) from exc
+
+    def remaining_audio() -> Iterator[bytes]:
+        yield first_chunk
+        try:
+            yield from audio_stream
+        except Exception as exc:
+            logger.warning("ElevenLabs TTS stream ended early: %s", exc)
+
     return StreamingResponse(
-        stream_speech(req.text),
+        remaining_audio(),
         media_type="audio/mpeg",
         headers={"Content-Disposition": "attachment; filename=tts_test.mp3"},
     )

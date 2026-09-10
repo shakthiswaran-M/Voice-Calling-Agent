@@ -33,8 +33,8 @@ def stream_speech(text: str) -> Iterator[bytes]:
         for chunk in _stream_speech_sync(text):
             yielded_audio = True
             yield chunk
-    except Exception:
-        logger.exception("[TTS] ElevenLabs failed")
+    except Exception as exc:
+        logger.warning("[TTS] ElevenLabs unavailable: %s", exc)
         raise
     if not yielded_audio:
         raise ValueError("ElevenLabs returned empty audio")

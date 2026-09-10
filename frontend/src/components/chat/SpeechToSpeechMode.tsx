@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { LoaderCircle, Mic, MicOff, Volume2, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { speechSynthesisService } from '../../lib/speechSynthesisService';
-import { sendChatMessageStream, transcribeAudio, ApiError } from '../../lib/api';
+import { sendChatMessageStream, transcribeAudio, synthesizeSpeech, ApiError } from '../../lib/api';
 import { useChatStore } from '../../store/useChatStore';
 
 type SpeechState = 'idle' | 'listening' | 'thinking' | 'speaking' | 'error';
@@ -42,6 +42,11 @@ export function SpeechToSpeechMode({
   // ── Refs ──
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const silenceTimerRef = useRef<number | null>(null);
+  const restartTimerRef = useRef<number | null>(null);
+  const welcomeTimerRef = useRef<number | null>(null);
 
   // Web Speech — runs in parallel during recording for live display + fallback
   const wsRecognitionRef = useRef<WSRecognition | null>(null);
@@ -56,6 +61,13 @@ export function SpeechToSpeechMode({
   const turnIdRef = useRef(0);
   const processingRef = useRef(false);
   const welcomeSpokenRef = useRef(false);
+  const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
+  const ttsAbortControllerRef = useRef<AbortController | null>(null);
+  const sttAbortControllerRef = useRef<AbortController | null>(null);
+  const llmAbortControllerRef = useRef<AbortController | null>(null);
+  const ttsAudioUrlRef = useRef<string | null>(null);
+  const startListeningRef = useRef<() => Promise<void>>(async () => {});
+  const voiceSessionActiveRef = useRef(false);
 
   // Chat store refs (avoid stale closures)
   const { activeThreadId, addMessage, createThread, setThreadSessionId } = useChatStore();
@@ -83,6 +95,7 @@ export function SpeechToSpeechMode({
   }, []);
 
   const showError = useCallback((msg: string) => {
+    if (!voiceSessionActiveRef.current) return;
     console.info('[Speech] State → error:', msg);
     processingRef.current = false;
     ttsSpeakingRef.current = false;
@@ -93,7 +106,7 @@ export function SpeechToSpeechMode({
 
   // ── TTS: sentence-by-sentence with queue ──
   const speakSentence = useCallback((text: string, turnId: number) => {
-    if (!text.trim()) return;
+    if (!text.trim() || !voiceSessionActiveRef.current || turnIdRef.current !== turnId) return;
     if (ttsSpeakingRef.current) {
       ttsQueueRef.current.push(text);
       return;
@@ -102,41 +115,68 @@ export function SpeechToSpeechMode({
     console.info('[Speech] State → speaking');
     setState('speaking');
 
-    if (!('speechSynthesis' in window)) {
+    const finish = () => {
       ttsSpeakingRef.current = false;
-      goToIdle();
-      return;
-    }
+      ttsAudioRef.current = null;
+      ttsAbortControllerRef.current = null;
+      if (turnIdRef.current !== turnId) return;
+      const next = ttsQueueRef.current.shift();
+      if (next) {
+        speakSentence(next, turnId);
+      } else {
+        goToIdle();
+        restartTimerRef.current = window.setTimeout(() => {
+          restartTimerRef.current = null;
+          if (voiceSessionActiveRef.current && turnIdRef.current === turnId) {
+            void startListeningRef.current();
+          }
+        }, 0);
+      }
+    };
 
-    speechSynthesisService.speak(text, {
-      onstart: () => console.info('[Speech] TTS started:', text.substring(0, 50)),
-      onend: () => {
-        console.info('[Speech] TTS completed');
-        ttsSpeakingRef.current = false;
-        if (turnIdRef.current !== turnId) return;
-        const next = ttsQueueRef.current.shift();
-        if (next) speakSentence(next, turnId);
-        else goToIdle();
-      },
-      onerror: (event) => {
-        if (event.error === 'canceled' || event.error === 'interrupted') {
-          ttsSpeakingRef.current = false;
-          if (turnIdRef.current !== turnId) return;
-          const next = ttsQueueRef.current.shift();
-          if (next) speakSentence(next, turnId);
-          else goToIdle();
+    const fallback = () => {
+      if (!('speechSynthesis' in window)) { finish(); return; }
+      speechSynthesisService.speak(text, {
+        onstart: () => console.info('[Speech] Browser TTS fallback started'),
+        onend: finish,
+        onerror: finish,
+      });
+    };
+
+    const playElevenLabs = async () => {
+      const controller = new AbortController();
+      ttsAbortControllerRef.current = controller;
+      try {
+        const response = await synthesizeSpeech(text, controller.signal);
+        if (!voiceSessionActiveRef.current || turnIdRef.current !== turnId) return;
+        const audioUrl = URL.createObjectURL(await response.blob());
+        if (!voiceSessionActiveRef.current || turnIdRef.current !== turnId) {
+          URL.revokeObjectURL(audioUrl);
           return;
         }
-        console.warn('[Speech] TTS failed:', event.error);
-        ttsSpeakingRef.current = false;
-        goToIdle();
-      },
-    });
+        const audio = new Audio(audioUrl);
+        ttsAudioRef.current = audio;
+        ttsAudioUrlRef.current = audioUrl;
+        audio.onended = () => { URL.revokeObjectURL(audioUrl); finish(); };
+        audio.onerror = () => {
+          URL.revokeObjectURL(audioUrl);
+          ttsAudioUrlRef.current = null;
+          if (voiceSessionActiveRef.current) fallback();
+        };
+        await audio.play();
+      } catch (error) {
+        if (controller.signal.aborted || !voiceSessionActiveRef.current || turnIdRef.current !== turnId) return;
+        console.warn('[Speech] ElevenLabs TTS failed:', error);
+        fallback();
+      }
+    };
+
+    void playElevenLabs();
   }, [goToIdle]);
 
   // ── Stream chunk handler ──
   const handleStreamChunk = useCallback((chunk: string, turnId: number) => {
-    if (turnIdRef.current !== turnId) return;
+    if (!voiceSessionActiveRef.current || turnIdRef.current !== turnId) return;
     streamBufferRef.current += chunk;
     setResponseText(streamBufferRef.current);
 
@@ -187,13 +227,81 @@ export function SpeechToSpeechMode({
 
   const stopWsRecognition = useCallback(() => {
     wsActiveRef.current = false;
-    try { wsRecognitionRef.current?.stop(); } catch { /* ignore */ }
+    const recognition = wsRecognitionRef.current;
+    if (recognition) {
+      recognition.onresult = null;
+      recognition.onerror = null;
+      recognition.onend = null;
+      try { recognition.abort(); } catch { /* ignore */ }
+    }
     wsRecognitionRef.current = null;
   }, []);
+
+  const stopListening = useCallback(() => {
+    if (silenceTimerRef.current !== null) {
+      window.clearInterval(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+    void audioContextRef.current?.close();
+    audioContextRef.current = null;
+    if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop();
+    stopWsRecognition();
+  }, [stopWsRecognition]);
+
+  const stopVoiceSession = useCallback(() => {
+    voiceSessionActiveRef.current = false;
+    turnIdRef.current += 1;
+    processingRef.current = false;
+
+    if (welcomeTimerRef.current !== null) {
+      window.clearTimeout(welcomeTimerRef.current);
+      welcomeTimerRef.current = null;
+    }
+    if (restartTimerRef.current !== null) {
+      window.clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
+
+    stopListening();
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.ondataavailable = null;
+      mediaRecorderRef.current.onstop = null;
+      mediaRecorderRef.current = null;
+    }
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    mediaStreamRef.current = null;
+
+    llmAbortControllerRef.current?.abort();
+    llmAbortControllerRef.current = null;
+    sttAbortControllerRef.current?.abort();
+    sttAbortControllerRef.current = null;
+    ttsAbortControllerRef.current?.abort();
+    ttsAbortControllerRef.current = null;
+    ttsAudioRef.current?.pause();
+    if (ttsAudioRef.current) {
+      ttsAudioRef.current.onended = null;
+      ttsAudioRef.current.onerror = null;
+      ttsAudioRef.current.currentTime = 0;
+      ttsAudioRef.current.src = '';
+    }
+    ttsAudioRef.current = null;
+    if (ttsAudioUrlRef.current) {
+      URL.revokeObjectURL(ttsAudioUrlRef.current);
+      ttsAudioUrlRef.current = null;
+    }
+    speechSynthesisService.cancel();
+    ttsSpeakingRef.current = false;
+    ttsQueueRef.current = [];
+    ttsBufferRef.current = '';
+    streamBufferRef.current = '';
+    setIsListening(false);
+    setState('idle');
+  }, [stopListening]);
 
   // ── Process recording: STT → LLM → TTS ──
   // Uses a ref so MediaRecorder.onstop always calls the latest version.
   const processRecording = useCallback(async (audioBlob: Blob) => {
+    if (!voiceSessionActiveRef.current) return;
     setIsListening(false);
     stopWsRecognition();
     console.info('[Speech] Stop listening');
@@ -209,19 +317,31 @@ export function SpeechToSpeechMode({
 
     // ── STT: Sarvam primary, Web Speech fallback ──
     let finalText = '';
+    const sttController = new AbortController();
+    sttAbortControllerRef.current = sttController;
     try {
       console.info('[Speech] Trying Sarvam STT...');
-      finalText = await transcribeAudio(audioBlob);
+      finalText = await transcribeAudio(audioBlob, sttController.signal);
       console.info('[Speech] Sarvam transcript:', finalText);
     } catch (err) {
+      if (sttController.signal.aborted || !voiceSessionActiveRef.current) return;
       console.warn('[Speech] Sarvam STT failed:', err);
       finalText = wsText;
       if (finalText) console.info('[Speech] Using Web Speech fallback:', finalText);
     }
+    sttAbortControllerRef.current = null;
+
+    if (!voiceSessionActiveRef.current || turnIdRef.current !== currentTurn) return;
 
     if (!finalText.trim()) {
       console.info('[Speech] No transcript — returning to idle');
       goToIdle();
+      restartTimerRef.current = window.setTimeout(() => {
+        restartTimerRef.current = null;
+        if (voiceSessionActiveRef.current && turnIdRef.current === currentTurn) {
+          void startListeningRef.current();
+        }
+      }, 0);
       return;
     }
 
@@ -238,13 +358,17 @@ export function SpeechToSpeechMode({
     setResponseText('');
 
     try {
+      const llmController = new AbortController();
+      llmAbortControllerRef.current = llmController;
       const sessionId = useChatStore.getState().threads.find((t) => t.id === threadId)?.sessionId;
       const newSessionId = await sendChatMessageStream(
         finalText.trim(),
         (chunk) => handleStreamChunk(chunk, currentTurn),
         sessionId,
+        llmController.signal,
       );
-      if (turnIdRef.current !== currentTurn) return;
+      llmAbortControllerRef.current = null;
+      if (!voiceSessionActiveRef.current || turnIdRef.current !== currentTurn) return;
       if (newSessionId && !sessionId) setSessionRef.current(threadId, newSessionId);
 
       console.info('[Speech] LLM completed');
@@ -256,6 +380,12 @@ export function SpeechToSpeechMode({
         speakSentence(remaining, currentTurn);
       } else if (!ttsSpeakingRef.current && ttsQueueRef.current.length === 0) {
         goToIdle();
+        restartTimerRef.current = window.setTimeout(() => {
+          restartTimerRef.current = null;
+          if (voiceSessionActiveRef.current && turnIdRef.current === currentTurn) {
+            void startListeningRef.current();
+          }
+        }, 0);
       }
 
       // Add bot message to chat
@@ -264,7 +394,8 @@ export function SpeechToSpeechMode({
         addMessageRef.current(threadId, { role: 'bot', content: fullResponse });
       }
     } catch (err) {
-      if (turnIdRef.current !== currentTurn) return;
+      llmAbortControllerRef.current = null;
+      if (!voiceSessionActiveRef.current || turnIdRef.current !== currentTurn) return;
       const msg = err instanceof ApiError ? err.message : 'Could not complete that request. Please try again.';
       console.warn('[Speech] LLM failed:', err);
       showError(msg);
@@ -277,24 +408,65 @@ export function SpeechToSpeechMode({
 
   // ── Start recording ──
   const startListening = useCallback(async () => {
-    if (processingRef.current || isListening) return;
+    if (!voiceSessionActiveRef.current || processingRef.current || isListening) return;
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!voiceSessionActiveRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       const recorder = new MediaRecorder(stream);
+      mediaStreamRef.current = stream;
       audioChunksRef.current = [];
 
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) audioChunksRef.current.push(e.data);
       };
       recorder.onstop = () => {
+        stopListening();
         stream.getTracks().forEach((t) => t.stop());
+        if (mediaStreamRef.current === stream) mediaStreamRef.current = null;
+        if (!voiceSessionActiveRef.current) return;
         const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         void processRecordingRef.current(blob);
       };
 
       mediaRecorderRef.current = recorder;
       recorder.start();
+      const audioContext = new AudioContext();
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 512;
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+      const samples = new Uint8Array(analyser.fftSize);
+      const startedAt = performance.now();
+      let speechDetected = false;
+      let silenceStartedAt: number | null = null;
+      audioContextRef.current = audioContext;
+      silenceTimerRef.current = window.setInterval(() => {
+        if (!voiceSessionActiveRef.current) {
+          stopListening();
+          return;
+        }
+        analyser.getByteTimeDomainData(samples);
+        let sum = 0;
+        for (const sample of samples) {
+          const normalized = (sample - 128) / 128;
+          sum += normalized * normalized;
+        }
+        const volume = Math.sqrt(sum / samples.length);
+        const now = performance.now();
+        if (volume > 0.025) {
+          speechDetected = true;
+          silenceStartedAt = null;
+        } else if (speechDetected) {
+          silenceStartedAt ??= now;
+          if (now - silenceStartedAt >= 1200) stopListening();
+        } else if (now - startedAt >= 15000) {
+          stopListening();
+        }
+      }, 100);
       setIsListening(true);
       console.info('[Speech] Start listening');
       setState('listening');
@@ -304,7 +476,9 @@ export function SpeechToSpeechMode({
       console.warn('[Speech] Mic access denied:', err);
       showError('Microphone access was denied or unavailable.');
     }
-  }, [isListening, showError, startWsRecognition]);
+  }, [isListening, showError, startWsRecognition, stopListening]);
+
+  startListeningRef.current = startListening;
 
   // ── Toggle button ──
   const handleToggle = useCallback(() => {
@@ -318,46 +492,37 @@ export function SpeechToSpeechMode({
 
   // ── Cleanup on unmount ──
   useEffect(() => () => {
-    turnIdRef.current += 1;
-    speechSynthesisService.cancel();
-    stopWsRecognition();
-    if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop();
-  }, [stopWsRecognition]);
+    stopVoiceSession();
+  }, [stopVoiceSession]);
 
   // ── Open/close + welcome message ──
   useEffect(() => {
     if (!isOpen) {
       welcomeSpokenRef.current = false;
+      stopVoiceSession();
       return;
     }
+    voiceSessionActiveRef.current = true;
+    turnIdRef.current += 1;
     goToIdle();
 
     if (welcomeSpokenRef.current) return;
     welcomeSpokenRef.current = true;
 
-    const timer = setTimeout(() => {
-      if (!('speechSynthesis' in window)) return;
-      const welcomeText = 'Welcome to NetKathir. How can I help you Today?';
+    welcomeTimerRef.current = window.setTimeout(() => {
+      welcomeTimerRef.current = null;
+      if (!voiceSessionActiveRef.current) return;
+      const welcomeText = 'Welcome to Netkathir, how can I help you today?';
       const turn = turnIdRef.current;
-      setState('speaking');
-      speechSynthesisService.speak(welcomeText, {
-        onstart: () => console.info('[Speech] Welcome TTS started'),
-        onend: () => {
-          console.info('[Speech] Welcome TTS ended');
-          if (turnIdRef.current !== turn) return;
-          goToIdle();
-        },
-        onerror: (event) => {
-          console.info('[Speech] Welcome TTS error:', event.error);
-          if (event.error === 'canceled' || event.error === 'interrupted') {
-            if (turnIdRef.current !== turn) return;
-          }
-          goToIdle();
-        },
-      });
+      speakSentence(welcomeText, turn);
     }, 400);
-    return () => clearTimeout(timer);
-  }, [isOpen, goToIdle]);
+    return () => {
+      if (welcomeTimerRef.current !== null) {
+        window.clearTimeout(welcomeTimerRef.current);
+        welcomeTimerRef.current = null;
+      }
+    };
+  }, [isOpen, goToIdle, speakSentence, stopVoiceSession]);
 
   if (!isOpen) return null;
 
@@ -380,7 +545,7 @@ export function SpeechToSpeechMode({
     <div className={cn('fixed inset-0 z-[70] flex flex-col', isDarkMode ? 'bg-[#050806] text-white' : 'bg-[#f8fcf5] text-midnight-900')}>
       <div className="flex items-center justify-between px-4 py-4 sm:px-8">
         <span className="text-xs font-semibold uppercase tracking-[0.2em] text-green-500">NetKathir voice</span>
-        <button type="button" onClick={onClose} aria-label="Close speech to speech" className={cn('rounded-full p-2 transition-colors', isDarkMode ? 'text-white/50 hover:bg-white/10 hover:text-white' : 'text-midnight-400 hover:bg-green-100 hover:text-green-700')}>
+        <button type="button" onClick={() => { stopVoiceSession(); onClose(); }} aria-label="Close speech to speech" className={cn('rounded-full p-2 transition-colors', isDarkMode ? 'text-white/50 hover:bg-white/10 hover:text-white' : 'text-midnight-400 hover:bg-green-100 hover:text-green-700')}>
           <X className="h-5 w-5" />
         </button>
       </div>
@@ -440,7 +605,7 @@ export function SpeechToSpeechMode({
           )}
         >
           {state === 'listening' ? <MicOff className="h-4 w-4" /> : state === 'thinking' ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Mic className="h-4 w-4" />}
-          {state === 'listening' ? 'Stop and send' : state === 'thinking' ? 'Thinking...' : state === 'speaking' ? 'Speaking...' : state === 'error' ? 'Try again' : 'Start Conversation'}
+          {state === 'listening' ? 'Pause listening' : state === 'thinking' ? 'Thinking...' : state === 'speaking' ? 'Speaking...' : state === 'error' ? 'Try again' : 'Start Conversation'}
         </button>
       </div>
     </div>

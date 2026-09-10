@@ -103,13 +103,13 @@ export async function sendChatMessage(
 }
 
 /** Send recorded audio to the backend and get back the transcribed text. */
-export async function transcribeAudio(audioBlob: Blob): Promise<string> {
+export async function transcribeAudio(audioBlob: Blob, signal?: AbortSignal): Promise<string> {
   const formData = new FormData();
   formData.append('file', audioBlob, 'recording.wav');
 
   const res = await request(
     `${API_BASE_URL}${ENDPOINTS.stt}`,
-    { method: 'POST', body: formData },
+    { method: 'POST', body: formData, signal },
     NETWORK_ERROR_MESSAGES.stt
   );
   const data = (await res.json()) as SttResponse;
@@ -146,11 +146,13 @@ export async function sendChatMessageStream(
   message: string,
   onChunk: (text: string) => void,
   sessionId?: string | null,
+  signal?: AbortSignal,
 ): Promise<string> {
   const res = await fetch(`${API_BASE_URL}/api/chat/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message, session_id: sessionId ?? null }),
+    signal,
   });
 
   if (!res.ok) {
