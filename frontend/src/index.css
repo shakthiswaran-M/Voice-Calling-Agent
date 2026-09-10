@@ -214,9 +214,8 @@ a, button, [role="button"] { cursor: pointer; }
    ================================================================ */
 
 @media print {
-  /* Hide everything except the print area */
+  /* Hide the sidebar and controls, but keep the conversation content visible */
   .chat-sidebar,
-  .chat-sidebar ~ *,
   [aria-label="Open sidebar"],
   [aria-label="Close sidebar"],
   button[aria-label],
