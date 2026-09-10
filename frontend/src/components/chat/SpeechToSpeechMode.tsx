@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { LoaderCircle, Mic, MicOff, Volume2, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { speechSynthesisService } from '../../lib/speechSynthesisService';
-import { sendChatMessageStream, transcribeAudio, ApiError } from '../../lib/api';
+import { sendChatMessageStream, transcribeAudio, synthesizeSpeech, ApiError } from '../../lib/api';
 import { useChatStore } from '../../store/useChatStore';
 
 type SpeechState = 'idle' | 'listening' | 'thinking' | 'speaking' | 'error';
@@ -42,6 +42,8 @@ export function SpeechToSpeechMode({
   // ── Refs ──
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const silenceTimerRef = useRef<number | null>(null);
 
   // Web Speech — runs in parallel during recording for live display + fallback
   const wsRecognitionRef = useRef<WSRecognition | null>(null);
@@ -56,6 +58,9 @@ export function SpeechToSpeechMode({
   const turnIdRef = useRef(0);
   const processingRef = useRef(false);
   const welcomeSpokenRef = useRef(false);
+  const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
+  const ttsAbortControllerRef = useRef<AbortController | null>(null);
+  const startListeningRef = useRef<() => Promise<void>>(async () => {});
 
   // Chat store refs (avoid stale closures)
   const { activeThreadId, addMessage, createThread, setThreadSessionId } = useChatStore();
@@ -102,36 +107,49 @@ export function SpeechToSpeechMode({
     console.info('[Speech] State → speaking');
     setState('speaking');
 
-    if (!('speechSynthesis' in window)) {
+    const finish = () => {
       ttsSpeakingRef.current = false;
-      goToIdle();
-      return;
-    }
-
-    speechSynthesisService.speak(text, {
-      onstart: () => console.info('[Speech] TTS started:', text.substring(0, 50)),
-      onend: () => {
-        console.info('[Speech] TTS completed');
-        ttsSpeakingRef.current = false;
-        if (turnIdRef.current !== turnId) return;
-        const next = ttsQueueRef.current.shift();
-        if (next) speakSentence(next, turnId);
-        else goToIdle();
-      },
-      onerror: (event) => {
-        if (event.error === 'canceled' || event.error === 'interrupted') {
-          ttsSpeakingRef.current = false;
-          if (turnIdRef.current !== turnId) return;
-          const next = ttsQueueRef.current.shift();
-          if (next) speakSentence(next, turnId);
-          else goToIdle();
-          return;
-        }
-        console.warn('[Speech] TTS failed:', event.error);
-        ttsSpeakingRef.current = false;
+      ttsAudioRef.current = null;
+      ttsAbortControllerRef.current = null;
+      if (turnIdRef.current !== turnId) return;
+      const next = ttsQueueRef.current.shift();
+      if (next) {
+        speakSentence(next, turnId);
+      } else {
         goToIdle();
-      },
-    });
+        window.setTimeout(() => { void startListeningRef.current(); }, 0);
+      }
+    };
+
+    const fallback = () => {
+      if (!('speechSynthesis' in window)) { finish(); return; }
+      speechSynthesisService.speak(text, {
+        onstart: () => console.info('[Speech] Browser TTS fallback started'),
+        onend: finish,
+        onerror: finish,
+      });
+    };
+
+    const playElevenLabs = async () => {
+      const controller = new AbortController();
+      ttsAbortControllerRef.current = controller;
+      try {
+        const response = await synthesizeSpeech(text, controller.signal);
+        if (turnIdRef.current !== turnId) return;
+        const audioUrl = URL.createObjectURL(await response.blob());
+        const audio = new Audio(audioUrl);
+        ttsAudioRef.current = audio;
+        audio.onended = () => { URL.revokeObjectURL(audioUrl); finish(); };
+        audio.onerror = () => { URL.revokeObjectURL(audioUrl); fallback(); };
+        await audio.play();
+      } catch (error) {
+        if (controller.signal.aborted || turnIdRef.current !== turnId) return;
+        console.warn('[Speech] ElevenLabs TTS failed:', error);
+        fallback();
+      }
+    };
+
+    void playElevenLabs();
   }, [goToIdle]);
 
   // ── Stream chunk handler ──
@@ -191,6 +209,17 @@ export function SpeechToSpeechMode({
     wsRecognitionRef.current = null;
   }, []);
 
+  const stopListening = useCallback(() => {
+    if (silenceTimerRef.current !== null) {
+      window.clearInterval(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+    void audioContextRef.current?.close();
+    audioContextRef.current = null;
+    if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop();
+    stopWsRecognition();
+  }, [stopWsRecognition]);
+
   // ── Process recording: STT → LLM → TTS ──
   // Uses a ref so MediaRecorder.onstop always calls the latest version.
   const processRecording = useCallback(async (audioBlob: Blob) => {
@@ -222,6 +251,7 @@ export function SpeechToSpeechMode({
     if (!finalText.trim()) {
       console.info('[Speech] No transcript — returning to idle');
       goToIdle();
+      window.setTimeout(() => { void startListeningRef.current(); }, 0);
       return;
     }
 
@@ -256,6 +286,7 @@ export function SpeechToSpeechMode({
         speakSentence(remaining, currentTurn);
       } else if (!ttsSpeakingRef.current && ttsQueueRef.current.length === 0) {
         goToIdle();
+        window.setTimeout(() => { void startListeningRef.current(); }, 0);
       }
 
       // Add bot message to chat
@@ -288,6 +319,7 @@ export function SpeechToSpeechMode({
         if (e.data.size > 0) audioChunksRef.current.push(e.data);
       };
       recorder.onstop = () => {
+        stopListening();
         stream.getTracks().forEach((t) => t.stop());
         const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         void processRecordingRef.current(blob);
@@ -295,6 +327,35 @@ export function SpeechToSpeechMode({
 
       mediaRecorderRef.current = recorder;
       recorder.start();
+      const audioContext = new AudioContext();
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 512;
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+      const samples = new Uint8Array(analyser.fftSize);
+      const startedAt = performance.now();
+      let speechDetected = false;
+      let silenceStartedAt: number | null = null;
+      audioContextRef.current = audioContext;
+      silenceTimerRef.current = window.setInterval(() => {
+        analyser.getByteTimeDomainData(samples);
+        let sum = 0;
+        for (const sample of samples) {
+          const normalized = (sample - 128) / 128;
+          sum += normalized * normalized;
+        }
+        const volume = Math.sqrt(sum / samples.length);
+        const now = performance.now();
+        if (volume > 0.025) {
+          speechDetected = true;
+          silenceStartedAt = null;
+        } else if (speechDetected) {
+          silenceStartedAt ??= now;
+          if (now - silenceStartedAt >= 1200) stopListening();
+        } else if (now - startedAt >= 15000) {
+          stopListening();
+        }
+      }, 100);
       setIsListening(true);
       console.info('[Speech] Start listening');
       setState('listening');
@@ -304,7 +365,9 @@ export function SpeechToSpeechMode({
       console.warn('[Speech] Mic access denied:', err);
       showError('Microphone access was denied or unavailable.');
     }
-  }, [isListening, showError, startWsRecognition]);
+  }, [isListening, showError, startWsRecognition, stopListening]);
+
+  startListeningRef.current = startListening;
 
   // ── Toggle button ──
   const handleToggle = useCallback(() => {
@@ -320,14 +383,22 @@ export function SpeechToSpeechMode({
   useEffect(() => () => {
     turnIdRef.current += 1;
     speechSynthesisService.cancel();
-    stopWsRecognition();
-    if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop();
-  }, [stopWsRecognition]);
+    ttsAbortControllerRef.current?.abort();
+    ttsAudioRef.current?.pause();
+    ttsAudioRef.current = null;
+    stopListening();
+  }, [stopListening]);
 
   // ── Open/close + welcome message ──
   useEffect(() => {
     if (!isOpen) {
       welcomeSpokenRef.current = false;
+      turnIdRef.current += 1;
+      speechSynthesisService.cancel();
+      ttsAbortControllerRef.current?.abort();
+      ttsAudioRef.current?.pause();
+      ttsAudioRef.current = null;
+      stopListening();
       return;
     }
     goToIdle();
@@ -336,28 +407,12 @@ export function SpeechToSpeechMode({
     welcomeSpokenRef.current = true;
 
     const timer = setTimeout(() => {
-      if (!('speechSynthesis' in window)) return;
-      const welcomeText = 'Welcome to NetKathir. How can I help you Today?';
+      const welcomeText = 'Welcome to Netkathir, how can I help you today?';
       const turn = turnIdRef.current;
-      setState('speaking');
-      speechSynthesisService.speak(welcomeText, {
-        onstart: () => console.info('[Speech] Welcome TTS started'),
-        onend: () => {
-          console.info('[Speech] Welcome TTS ended');
-          if (turnIdRef.current !== turn) return;
-          goToIdle();
-        },
-        onerror: (event) => {
-          console.info('[Speech] Welcome TTS error:', event.error);
-          if (event.error === 'canceled' || event.error === 'interrupted') {
-            if (turnIdRef.current !== turn) return;
-          }
-          goToIdle();
-        },
-      });
+      speakSentence(welcomeText, turn);
     }, 400);
     return () => clearTimeout(timer);
-  }, [isOpen, goToIdle]);
+  }, [isOpen, goToIdle, speakSentence, stopListening]);
 
   if (!isOpen) return null;
 
@@ -440,7 +495,7 @@ export function SpeechToSpeechMode({
           )}
         >
           {state === 'listening' ? <MicOff className="h-4 w-4" /> : state === 'thinking' ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Mic className="h-4 w-4" />}
-          {state === 'listening' ? 'Stop and send' : state === 'thinking' ? 'Thinking...' : state === 'speaking' ? 'Speaking...' : state === 'error' ? 'Try again' : 'Start Conversation'}
+          {state === 'listening' ? 'Pause listening' : state === 'thinking' ? 'Thinking...' : state === 'speaking' ? 'Speaking...' : state === 'error' ? 'Try again' : 'Start Conversation'}
         </button>
       </div>
     </div>

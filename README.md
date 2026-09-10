@@ -68,6 +68,26 @@ DATABASE_URL=
 REDIS_URL=
 ```
 
+## Browser voice mode
+
+The frontend voice button opens a continuous conversation mode. It speaks the
+welcome message, listens automatically, submits audio after speech followed by
+1.2 seconds of silence, streams the final LLM response over SSE, and returns to
+listening after TTS playback. Interim text is displayed with the browser Web
+Speech API when supported; Sarvam remains the authoritative final transcription.
+
+The voice modal uses the existing ElevenLabs `/api/tts-test` endpoint first and
+falls back to browser speech if audio generation or playback is unavailable.
+The modal currently buffers each ElevenLabs response before playback, while the
+normal chat message player uses MediaSource chunked audio playback. The LLM
+endpoint streams tokens only after any tool-calling rounds have completed.
+
+Required backend variables are `LLM_API_KEY`, `LLM_MODEL`, `LLM_BASE_URL`,
+`STT_API_KEY`, `STT_URL`, `STT_MODEL`, `STT_LANGUAGE_CODE`,
+`ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, `ELEVENLABS_MODEL_ID`,
+`DATABASE_URL`, and `CORS_ORIGINS`. Set frontend `VITE_API_URL` when the API is
+not running at `http://localhost:8000`.
+
 Create the PostgreSQL database before starting the backend:
 
 ```sql
