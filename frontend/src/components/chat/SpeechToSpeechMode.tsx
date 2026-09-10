@@ -42,8 +42,11 @@ export function SpeechToSpeechMode({
   // ── Refs ──
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const silenceTimerRef = useRef<number | null>(null);
+  const restartTimerRef = useRef<number | null>(null);
+  const welcomeTimerRef = useRef<number | null>(null);
 
   // Web Speech — runs in parallel during recording for live display + fallback
   const wsRecognitionRef = useRef<WSRecognition | null>(null);
@@ -60,7 +63,11 @@ export function SpeechToSpeechMode({
   const welcomeSpokenRef = useRef(false);
   const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
   const ttsAbortControllerRef = useRef<AbortController | null>(null);
+  const sttAbortControllerRef = useRef<AbortController | null>(null);
+  const llmAbortControllerRef = useRef<AbortController | null>(null);
+  const ttsAudioUrlRef = useRef<string | null>(null);
   const startListeningRef = useRef<() => Promise<void>>(async () => {});
+  const voiceSessionActiveRef = useRef(false);
 
   // Chat store refs (avoid stale closures)
   const { activeThreadId, addMessage, createThread, setThreadSessionId } = useChatStore();
@@ -88,6 +95,7 @@ export function SpeechToSpeechMode({
   }, []);
 
   const showError = useCallback((msg: string) => {
+    if (!voiceSessionActiveRef.current) return;
     console.info('[Speech] State → error:', msg);
     processingRef.current = false;
     ttsSpeakingRef.current = false;
@@ -98,7 +106,7 @@ export function SpeechToSpeechMode({
 
   // ── TTS: sentence-by-sentence with queue ──
   const speakSentence = useCallback((text: string, turnId: number) => {
-    if (!text.trim()) return;
+    if (!text.trim() || !voiceSessionActiveRef.current || turnIdRef.current !== turnId) return;
     if (ttsSpeakingRef.current) {
       ttsQueueRef.current.push(text);
       return;
@@ -117,7 +125,12 @@ export function SpeechToSpeechMode({
         speakSentence(next, turnId);
       } else {
         goToIdle();
-        window.setTimeout(() => { void startListeningRef.current(); }, 0);
+        restartTimerRef.current = window.setTimeout(() => {
+          restartTimerRef.current = null;
+          if (voiceSessionActiveRef.current && turnIdRef.current === turnId) {
+            void startListeningRef.current();
+          }
+        }, 0);
       }
     };
 
@@ -135,15 +148,24 @@ export function SpeechToSpeechMode({
       ttsAbortControllerRef.current = controller;
       try {
         const response = await synthesizeSpeech(text, controller.signal);
-        if (turnIdRef.current !== turnId) return;
+        if (!voiceSessionActiveRef.current || turnIdRef.current !== turnId) return;
         const audioUrl = URL.createObjectURL(await response.blob());
+        if (!voiceSessionActiveRef.current || turnIdRef.current !== turnId) {
+          URL.revokeObjectURL(audioUrl);
+          return;
+        }
         const audio = new Audio(audioUrl);
         ttsAudioRef.current = audio;
+        ttsAudioUrlRef.current = audioUrl;
         audio.onended = () => { URL.revokeObjectURL(audioUrl); finish(); };
-        audio.onerror = () => { URL.revokeObjectURL(audioUrl); fallback(); };
+        audio.onerror = () => {
+          URL.revokeObjectURL(audioUrl);
+          ttsAudioUrlRef.current = null;
+          if (voiceSessionActiveRef.current) fallback();
+        };
         await audio.play();
       } catch (error) {
-        if (controller.signal.aborted || turnIdRef.current !== turnId) return;
+        if (controller.signal.aborted || !voiceSessionActiveRef.current || turnIdRef.current !== turnId) return;
         console.warn('[Speech] ElevenLabs TTS failed:', error);
         fallback();
       }
@@ -154,7 +176,7 @@ export function SpeechToSpeechMode({
 
   // ── Stream chunk handler ──
   const handleStreamChunk = useCallback((chunk: string, turnId: number) => {
-    if (turnIdRef.current !== turnId) return;
+    if (!voiceSessionActiveRef.current || turnIdRef.current !== turnId) return;
     streamBufferRef.current += chunk;
     setResponseText(streamBufferRef.current);
 
@@ -205,7 +227,13 @@ export function SpeechToSpeechMode({
 
   const stopWsRecognition = useCallback(() => {
     wsActiveRef.current = false;
-    try { wsRecognitionRef.current?.stop(); } catch { /* ignore */ }
+    const recognition = wsRecognitionRef.current;
+    if (recognition) {
+      recognition.onresult = null;
+      recognition.onerror = null;
+      recognition.onend = null;
+      try { recognition.abort(); } catch { /* ignore */ }
+    }
     wsRecognitionRef.current = null;
   }, []);
 
@@ -220,9 +248,60 @@ export function SpeechToSpeechMode({
     stopWsRecognition();
   }, [stopWsRecognition]);
 
+  const stopVoiceSession = useCallback(() => {
+    voiceSessionActiveRef.current = false;
+    turnIdRef.current += 1;
+    processingRef.current = false;
+
+    if (welcomeTimerRef.current !== null) {
+      window.clearTimeout(welcomeTimerRef.current);
+      welcomeTimerRef.current = null;
+    }
+    if (restartTimerRef.current !== null) {
+      window.clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
+
+    stopListening();
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.ondataavailable = null;
+      mediaRecorderRef.current.onstop = null;
+      mediaRecorderRef.current = null;
+    }
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    mediaStreamRef.current = null;
+
+    llmAbortControllerRef.current?.abort();
+    llmAbortControllerRef.current = null;
+    sttAbortControllerRef.current?.abort();
+    sttAbortControllerRef.current = null;
+    ttsAbortControllerRef.current?.abort();
+    ttsAbortControllerRef.current = null;
+    ttsAudioRef.current?.pause();
+    if (ttsAudioRef.current) {
+      ttsAudioRef.current.onended = null;
+      ttsAudioRef.current.onerror = null;
+      ttsAudioRef.current.currentTime = 0;
+      ttsAudioRef.current.src = '';
+    }
+    ttsAudioRef.current = null;
+    if (ttsAudioUrlRef.current) {
+      URL.revokeObjectURL(ttsAudioUrlRef.current);
+      ttsAudioUrlRef.current = null;
+    }
+    speechSynthesisService.cancel();
+    ttsSpeakingRef.current = false;
+    ttsQueueRef.current = [];
+    ttsBufferRef.current = '';
+    streamBufferRef.current = '';
+    setIsListening(false);
+    setState('idle');
+  }, [stopListening]);
+
   // ── Process recording: STT → LLM → TTS ──
   // Uses a ref so MediaRecorder.onstop always calls the latest version.
   const processRecording = useCallback(async (audioBlob: Blob) => {
+    if (!voiceSessionActiveRef.current) return;
     setIsListening(false);
     stopWsRecognition();
     console.info('[Speech] Stop listening');
@@ -238,20 +317,31 @@ export function SpeechToSpeechMode({
 
     // ── STT: Sarvam primary, Web Speech fallback ──
     let finalText = '';
+    const sttController = new AbortController();
+    sttAbortControllerRef.current = sttController;
     try {
       console.info('[Speech] Trying Sarvam STT...');
-      finalText = await transcribeAudio(audioBlob);
+      finalText = await transcribeAudio(audioBlob, sttController.signal);
       console.info('[Speech] Sarvam transcript:', finalText);
     } catch (err) {
+      if (sttController.signal.aborted || !voiceSessionActiveRef.current) return;
       console.warn('[Speech] Sarvam STT failed:', err);
       finalText = wsText;
       if (finalText) console.info('[Speech] Using Web Speech fallback:', finalText);
     }
+    sttAbortControllerRef.current = null;
+
+    if (!voiceSessionActiveRef.current || turnIdRef.current !== currentTurn) return;
 
     if (!finalText.trim()) {
       console.info('[Speech] No transcript — returning to idle');
       goToIdle();
-      window.setTimeout(() => { void startListeningRef.current(); }, 0);
+      restartTimerRef.current = window.setTimeout(() => {
+        restartTimerRef.current = null;
+        if (voiceSessionActiveRef.current && turnIdRef.current === currentTurn) {
+          void startListeningRef.current();
+        }
+      }, 0);
       return;
     }
 
@@ -268,13 +358,17 @@ export function SpeechToSpeechMode({
     setResponseText('');
 
     try {
+      const llmController = new AbortController();
+      llmAbortControllerRef.current = llmController;
       const sessionId = useChatStore.getState().threads.find((t) => t.id === threadId)?.sessionId;
       const newSessionId = await sendChatMessageStream(
         finalText.trim(),
         (chunk) => handleStreamChunk(chunk, currentTurn),
         sessionId,
+        llmController.signal,
       );
-      if (turnIdRef.current !== currentTurn) return;
+      llmAbortControllerRef.current = null;
+      if (!voiceSessionActiveRef.current || turnIdRef.current !== currentTurn) return;
       if (newSessionId && !sessionId) setSessionRef.current(threadId, newSessionId);
 
       console.info('[Speech] LLM completed');
@@ -286,7 +380,12 @@ export function SpeechToSpeechMode({
         speakSentence(remaining, currentTurn);
       } else if (!ttsSpeakingRef.current && ttsQueueRef.current.length === 0) {
         goToIdle();
-        window.setTimeout(() => { void startListeningRef.current(); }, 0);
+        restartTimerRef.current = window.setTimeout(() => {
+          restartTimerRef.current = null;
+          if (voiceSessionActiveRef.current && turnIdRef.current === currentTurn) {
+            void startListeningRef.current();
+          }
+        }, 0);
       }
 
       // Add bot message to chat
@@ -295,7 +394,8 @@ export function SpeechToSpeechMode({
         addMessageRef.current(threadId, { role: 'bot', content: fullResponse });
       }
     } catch (err) {
-      if (turnIdRef.current !== currentTurn) return;
+      llmAbortControllerRef.current = null;
+      if (!voiceSessionActiveRef.current || turnIdRef.current !== currentTurn) return;
       const msg = err instanceof ApiError ? err.message : 'Could not complete that request. Please try again.';
       console.warn('[Speech] LLM failed:', err);
       showError(msg);
@@ -308,11 +408,16 @@ export function SpeechToSpeechMode({
 
   // ── Start recording ──
   const startListening = useCallback(async () => {
-    if (processingRef.current || isListening) return;
+    if (!voiceSessionActiveRef.current || processingRef.current || isListening) return;
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!voiceSessionActiveRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       const recorder = new MediaRecorder(stream);
+      mediaStreamRef.current = stream;
       audioChunksRef.current = [];
 
       recorder.ondataavailable = (e) => {
@@ -321,6 +426,8 @@ export function SpeechToSpeechMode({
       recorder.onstop = () => {
         stopListening();
         stream.getTracks().forEach((t) => t.stop());
+        if (mediaStreamRef.current === stream) mediaStreamRef.current = null;
+        if (!voiceSessionActiveRef.current) return;
         const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         void processRecordingRef.current(blob);
       };
@@ -338,6 +445,10 @@ export function SpeechToSpeechMode({
       let silenceStartedAt: number | null = null;
       audioContextRef.current = audioContext;
       silenceTimerRef.current = window.setInterval(() => {
+        if (!voiceSessionActiveRef.current) {
+          stopListening();
+          return;
+        }
         analyser.getByteTimeDomainData(samples);
         let sum = 0;
         for (const sample of samples) {
@@ -381,38 +492,37 @@ export function SpeechToSpeechMode({
 
   // ── Cleanup on unmount ──
   useEffect(() => () => {
-    turnIdRef.current += 1;
-    speechSynthesisService.cancel();
-    ttsAbortControllerRef.current?.abort();
-    ttsAudioRef.current?.pause();
-    ttsAudioRef.current = null;
-    stopListening();
-  }, [stopListening]);
+    stopVoiceSession();
+  }, [stopVoiceSession]);
 
   // ── Open/close + welcome message ──
   useEffect(() => {
     if (!isOpen) {
       welcomeSpokenRef.current = false;
-      turnIdRef.current += 1;
-      speechSynthesisService.cancel();
-      ttsAbortControllerRef.current?.abort();
-      ttsAudioRef.current?.pause();
-      ttsAudioRef.current = null;
-      stopListening();
+      stopVoiceSession();
       return;
     }
+    voiceSessionActiveRef.current = true;
+    turnIdRef.current += 1;
     goToIdle();
 
     if (welcomeSpokenRef.current) return;
     welcomeSpokenRef.current = true;
 
-    const timer = setTimeout(() => {
+    welcomeTimerRef.current = window.setTimeout(() => {
+      welcomeTimerRef.current = null;
+      if (!voiceSessionActiveRef.current) return;
       const welcomeText = 'Welcome to Netkathir, how can I help you today?';
       const turn = turnIdRef.current;
       speakSentence(welcomeText, turn);
     }, 400);
-    return () => clearTimeout(timer);
-  }, [isOpen, goToIdle, speakSentence, stopListening]);
+    return () => {
+      if (welcomeTimerRef.current !== null) {
+        window.clearTimeout(welcomeTimerRef.current);
+        welcomeTimerRef.current = null;
+      }
+    };
+  }, [isOpen, goToIdle, speakSentence, stopVoiceSession]);
 
   if (!isOpen) return null;
 
@@ -435,7 +545,7 @@ export function SpeechToSpeechMode({
     <div className={cn('fixed inset-0 z-[70] flex flex-col', isDarkMode ? 'bg-[#050806] text-white' : 'bg-[#f8fcf5] text-midnight-900')}>
       <div className="flex items-center justify-between px-4 py-4 sm:px-8">
         <span className="text-xs font-semibold uppercase tracking-[0.2em] text-green-500">NetKathir voice</span>
-        <button type="button" onClick={onClose} aria-label="Close speech to speech" className={cn('rounded-full p-2 transition-colors', isDarkMode ? 'text-white/50 hover:bg-white/10 hover:text-white' : 'text-midnight-400 hover:bg-green-100 hover:text-green-700')}>
+        <button type="button" onClick={() => { stopVoiceSession(); onClose(); }} aria-label="Close speech to speech" className={cn('rounded-full p-2 transition-colors', isDarkMode ? 'text-white/50 hover:bg-white/10 hover:text-white' : 'text-midnight-400 hover:bg-green-100 hover:text-green-700')}>
           <X className="h-5 w-5" />
         </button>
       </div>
