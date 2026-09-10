@@ -9,7 +9,7 @@ import { MessageSearch } from './MessageSearch';
 import { ContextMenu, Copy, Reply, Pin, Forward } from './ContextMenu';
 import { useAutoScroll } from '../../hooks/useAutoScroll';
 import { ArrowDown, Menu, Search, Printer, ChevronDown, ChevronUp } from 'lucide-react';
-import { cn, TIMELINE_GAP_MS } from '../../lib/utils';
+import { cn, normalizeNetkathir, TIMELINE_GAP_MS } from '../../lib/utils';
 import { webmBlobToWav } from '../../lib/audioWav';
 import { sendChatMessage, transcribeAudio, synthesizeSpeech, ApiError } from '../../lib/api';
 import { cancelBrowserTts, speakWithBrowserTts } from '../../lib/browserTts';
@@ -296,7 +296,7 @@ export function ChatArea() {
         try {
           // Convert WebM → 16-bit PCM WAV before upload (see lib/audioWav.ts).
           const audioBlob = await webmBlobToWav(webmBlob);
-          const transcript = await transcribeAudio(audioBlob);
+          const transcript = normalizeNetkathir(await transcribeAudio(audioBlob));
           if (!transcript || !transcript.trim()) {
             addMessage(threadId, { role: 'bot', content: "Sorry, I didn't catch that." }); return;
           }
@@ -495,7 +495,7 @@ export function ChatArea() {
                 >
                   <Pin className={cn('w-3 h-3 shrink-0 self-center', isDarkMode ? 'text-green-400/80' : 'text-green-600')} />
                   <span className={cn('text-[11px] font-semibold uppercase tracking-wide shrink-0', isDarkMode ? 'text-green-400/80' : 'text-green-600')}>
-                    {latestPinned.role === 'user' ? 'You' : 'NetKathir'}
+                    {latestPinned.role === 'user' ? 'You' : 'Netkathir'}
                   </span>
                   <span className={cn('text-xs truncate', isDarkMode ? 'text-white/70 group-hover:text-white/90' : 'text-midnight-700 group-hover:text-midnight-900')}>
                     {latestPinned.content}
@@ -527,7 +527,7 @@ export function ChatArea() {
                     >
                       <Pin className={cn('w-3 h-3 shrink-0 self-center', pm.id === latestPinned.id ? (isDarkMode ? 'text-green-400 fill-green-400/40' : 'text-green-600 fill-green-500/30') : (isDarkMode ? 'text-white/25' : 'text-gray-300'))} />
                       <span className={cn('text-[10px] font-semibold uppercase tracking-wide shrink-0', pm.id === latestPinned.id ? (isDarkMode ? 'text-green-400' : 'text-green-600') : (isDarkMode ? 'text-white/40' : 'text-gray-400'))}>
-                        {pm.role === 'user' ? 'You' : 'NetKathir'}
+                        {pm.role === 'user' ? 'You' : 'Netkathir'}
                       </span>
                       <span className={cn('text-xs truncate', pm.id === latestPinned.id ? (isDarkMode ? 'text-white/85' : 'text-midnight-900') : (isDarkMode ? 'text-white/60' : 'text-midnight-600'))}>
                         {pm.content}
@@ -590,7 +590,7 @@ export function ChatArea() {
                       <div className={cn('w-5 h-5 sm:w-6 sm:h-6 rounded-md flex items-center justify-center overflow-hidden', isDarkMode ? 'bg-green-500/10 border border-green-500/20' : 'bg-green-50 border border-green-200')}>
                         <img src={logo} alt="" className="w-full h-full object-contain p-0.5" />
                       </div>
-                      <span className={cn('text-[10px] font-semibold tracking-wider uppercase', isDarkMode ? 'text-green-400/70' : 'text-green-600')}>netKathir</span>
+                      <span className={cn('text-[10px] font-semibold tracking-wider uppercase', isDarkMode ? 'text-green-400/70' : 'text-green-600')}>Netkathir</span>
                     </div>
                     <div className={cn('rounded-2xl rounded-tl-md px-5 py-4 flex items-center gap-2', isDarkMode ? 'bg-green-500/5 border border-green-500/10' : 'bg-white border border-green-100 shadow-card')}>
                       <span className="typing-dot" />
@@ -642,7 +642,7 @@ export function ChatArea() {
             <Menu className="w-5 h-5" />
           </button>
           <div className="flex-1 flex flex-col items-center justify-center px-6 min-h-0 safe-area-top">
-            <img src={logo} alt="netKathir" className="w-56 h-56 sm:w-72 sm:h-72 md:w-80 md:h-80 object-contain mb-6 sm:mb-8 drop-shadow-lg message-slide-in" />
+            <img src={logo} alt="Netkathir" className="w-56 h-56 sm:w-72 sm:h-72 md:w-80 md:h-80 object-contain mb-6 sm:mb-8 drop-shadow-lg" />
             <h1 className={cn('font-display text-xl sm:text-2xl md:text-3xl font-bold text-center mb-2 message-slide-in', isDarkMode ? 'text-[#ececec]' : 'text-midnight-900')} style={{ animationDelay: '0.1s' }}>
               How can I help you today?
             </h1>

@@ -4,6 +4,7 @@ import { cn } from '../../lib/utils';
 import { speechSynthesisService } from '../../lib/speechSynthesisService';
 import { sendChatMessageStream, transcribeAudio, synthesizeSpeech, ApiError } from '../../lib/api';
 import { useChatStore } from '../../store/useChatStore';
+import { normalizeNetkathir } from '../../lib/utils';
 
 type SpeechState = 'idle' | 'listening' | 'thinking' | 'speaking' | 'error';
 
@@ -45,6 +46,9 @@ export function SpeechToSpeechMode({
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const silenceTimerRef = useRef<number | null>(null);
+  const bargeInStreamRef = useRef<MediaStream | null>(null);
+  const bargeInContextRef = useRef<AudioContext | null>(null);
+  const bargeInTimerRef = useRef<number | null>(null);
   const restartTimerRef = useRef<number | null>(null);
   const welcomeTimerRef = useRef<number | null>(null);
 
@@ -68,6 +72,7 @@ export function SpeechToSpeechMode({
   const ttsAudioUrlRef = useRef<string | null>(null);
   const startListeningRef = useRef<() => Promise<void>>(async () => {});
   const voiceSessionActiveRef = useRef(false);
+  const startBargeInMonitorRef = useRef<() => Promise<void>>(async () => {});
 
   // Chat store refs (avoid stale closures)
   const { activeThreadId, addMessage, createThread, setThreadSessionId } = useChatStore();
@@ -104,6 +109,79 @@ export function SpeechToSpeechMode({
     setState('error');
   }, []);
 
+  const stopBargeInMonitor = useCallback(() => {
+    if (bargeInTimerRef.current !== null) {
+      window.clearInterval(bargeInTimerRef.current);
+      bargeInTimerRef.current = null;
+    }
+    void bargeInContextRef.current?.close();
+    bargeInContextRef.current = null;
+    bargeInStreamRef.current?.getTracks().forEach((track) => track.stop());
+    bargeInStreamRef.current = null;
+  }, []);
+
+  const stopSpeaking = useCallback(() => {
+    turnIdRef.current += 1;
+    processingRef.current = false;
+    llmAbortControllerRef.current?.abort();
+    llmAbortControllerRef.current = null;
+    stopBargeInMonitor();
+    ttsAbortControllerRef.current?.abort();
+    ttsAbortControllerRef.current = null;
+    speechSynthesisService.cancel();
+    ttsAudioRef.current?.pause();
+    if (ttsAudioRef.current) {
+      ttsAudioRef.current.onended = null;
+      ttsAudioRef.current.onerror = null;
+      ttsAudioRef.current.currentTime = 0;
+      ttsAudioRef.current.src = '';
+    }
+    ttsAudioRef.current = null;
+    if (ttsAudioUrlRef.current) {
+      URL.revokeObjectURL(ttsAudioUrlRef.current);
+      ttsAudioUrlRef.current = null;
+    }
+    ttsSpeakingRef.current = false;
+    ttsQueueRef.current = [];
+    ttsBufferRef.current = '';
+  }, [stopBargeInMonitor]);
+
+  const startBargeInMonitor = useCallback(async () => {
+    if (!voiceSessionActiveRef.current || bargeInStreamRef.current) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!voiceSessionActiveRef.current || !ttsSpeakingRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      const context = new AudioContext();
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 512;
+      context.createMediaStreamSource(stream).connect(analyser);
+      const samples = new Uint8Array(analyser.fftSize);
+      bargeInStreamRef.current = stream;
+      bargeInContextRef.current = context;
+      bargeInTimerRef.current = window.setInterval(() => {
+        if (!voiceSessionActiveRef.current || !ttsSpeakingRef.current) {
+          stopBargeInMonitor();
+          return;
+        }
+        analyser.getByteTimeDomainData(samples);
+        let sum = 0;
+        for (const sample of samples) {
+          const normalized = (sample - 128) / 128;
+          sum += normalized * normalized;
+        }
+        if (Math.sqrt(sum / samples.length) > 0.055) {
+          stopSpeaking();
+          void startListeningRef.current();
+        }
+      }, 100);
+    } catch {
+      // Barge-in monitoring is optional; the Stop button remains available.
+    }
+  }, [stopBargeInMonitor, stopSpeaking]);
+
   // ── TTS: sentence-by-sentence with queue ──
   const speakSentence = useCallback((text: string, turnId: number) => {
     if (!text.trim() || !voiceSessionActiveRef.current || turnIdRef.current !== turnId) return;
@@ -114,8 +192,10 @@ export function SpeechToSpeechMode({
     ttsSpeakingRef.current = true;
     console.info('[Speech] State → speaking');
     setState('speaking');
+    startBargeInMonitorRef.current();
 
     const finish = () => {
+      stopBargeInMonitor();
       ttsSpeakingRef.current = false;
       ttsAudioRef.current = null;
       ttsAbortControllerRef.current = null;
@@ -172,7 +252,9 @@ export function SpeechToSpeechMode({
     };
 
     void playElevenLabs();
-  }, [goToIdle]);
+  }, [goToIdle, stopBargeInMonitor]);
+
+  startBargeInMonitorRef.current = startBargeInMonitor;
 
   // ── Stream chunk handler ──
   const handleStreamChunk = useCallback((chunk: string, turnId: number) => {
@@ -213,7 +295,7 @@ export function SpeechToSpeechMode({
       }
       if (final) wsFinalTextRef.current += final;
       const display = [wsFinalTextRef.current, interim].filter(Boolean).join(' ').trim();
-      if (display) setTranscript(display);
+      if (display) setTranscript(normalizeNetkathir(display));
     };
     rec.onerror = () => {};
     rec.onend = () => {
@@ -263,6 +345,7 @@ export function SpeechToSpeechMode({
     }
 
     stopListening();
+    stopBargeInMonitor();
     if (mediaRecorderRef.current) {
       mediaRecorderRef.current.ondataavailable = null;
       mediaRecorderRef.current.onstop = null;
@@ -275,20 +358,7 @@ export function SpeechToSpeechMode({
     llmAbortControllerRef.current = null;
     sttAbortControllerRef.current?.abort();
     sttAbortControllerRef.current = null;
-    ttsAbortControllerRef.current?.abort();
-    ttsAbortControllerRef.current = null;
-    ttsAudioRef.current?.pause();
-    if (ttsAudioRef.current) {
-      ttsAudioRef.current.onended = null;
-      ttsAudioRef.current.onerror = null;
-      ttsAudioRef.current.currentTime = 0;
-      ttsAudioRef.current.src = '';
-    }
-    ttsAudioRef.current = null;
-    if (ttsAudioUrlRef.current) {
-      URL.revokeObjectURL(ttsAudioUrlRef.current);
-      ttsAudioUrlRef.current = null;
-    }
+    stopSpeaking();
     speechSynthesisService.cancel();
     ttsSpeakingRef.current = false;
     ttsQueueRef.current = [];
@@ -296,7 +366,7 @@ export function SpeechToSpeechMode({
     streamBufferRef.current = '';
     setIsListening(false);
     setState('idle');
-  }, [stopListening]);
+  }, [stopListening, stopBargeInMonitor, stopSpeaking]);
 
   // ── Process recording: STT → LLM → TTS ──
   // Uses a ref so MediaRecorder.onstop always calls the latest version.
@@ -306,7 +376,7 @@ export function SpeechToSpeechMode({
     stopWsRecognition();
     console.info('[Speech] Stop listening');
 
-    const wsText = wsFinalTextRef.current.trim();
+    const wsText = normalizeNetkathir(wsFinalTextRef.current.trim());
     if (wsText) setTranscript(wsText);
 
     console.info('[Speech] State → thinking');
@@ -321,7 +391,7 @@ export function SpeechToSpeechMode({
     sttAbortControllerRef.current = sttController;
     try {
       console.info('[Speech] Trying Sarvam STT...');
-      finalText = await transcribeAudio(audioBlob, sttController.signal);
+      finalText = normalizeNetkathir(await transcribeAudio(audioBlob, sttController.signal));
       console.info('[Speech] Sarvam transcript:', finalText);
     } catch (err) {
       if (sttController.signal.aborted || !voiceSessionActiveRef.current) return;
@@ -345,7 +415,8 @@ export function SpeechToSpeechMode({
       return;
     }
 
-    setTranscript(finalText.trim());
+    finalText = normalizeNetkathir(finalText.trim());
+    setTranscript(finalText);
 
     // Add user message to chat
     const threadId = activeThreadIdRef.current || createThreadRef.current().id;
@@ -544,7 +615,7 @@ export function SpeechToSpeechMode({
   return (
     <div className={cn('fixed inset-0 z-[70] flex flex-col', isDarkMode ? 'bg-[#050806] text-white' : 'bg-[#f8fcf5] text-midnight-900')}>
       <div className="flex items-center justify-between px-4 py-4 sm:px-8">
-        <span className="text-xs font-semibold uppercase tracking-[0.2em] text-green-500">NetKathir voice</span>
+        <span className="text-xs font-semibold uppercase tracking-[0.2em] text-green-500">Netkathir voice</span>
         <button type="button" onClick={() => { stopVoiceSession(); onClose(); }} aria-label="Close speech to speech" className={cn('rounded-full p-2 transition-colors', isDarkMode ? 'text-white/50 hover:bg-white/10 hover:text-white' : 'text-midnight-400 hover:bg-green-100 hover:text-green-700')}>
           <X className="h-5 w-5" />
         </button>
@@ -557,7 +628,11 @@ export function SpeechToSpeechMode({
           aria-label={`${statusText} orb`}
         />
 
-        <h1 className="max-w-xl text-2xl font-semibold tracking-tight sm:text-4xl">Welcome to NetKathir.</h1>
+        <div className={cn('voice-waveform mb-5', `voice-waveform-${state}`)} aria-hidden="true">
+          {Array.from({ length: 9 }, (_, index) => <span key={index} />)}
+        </div>
+
+        <h1 className="max-w-xl text-2xl font-semibold tracking-tight sm:text-4xl">Welcome to Netkathir.</h1>
         <p className={cn('mt-2 max-w-xl text-base sm:text-lg', isDarkMode ? 'text-white/60' : 'text-midnight-500')}>
           {state === 'idle' || state === 'error' ? 'How can I help you?' : statusText}
         </p>
@@ -582,12 +657,26 @@ export function SpeechToSpeechMode({
                   {state === 'thinking' && <LoaderCircle className="h-4 w-4 animate-spin" />}
                   {state === 'speaking' && <Volume2 className="h-4 w-4 text-green-500" />}
                   {state === 'error' && <span className="text-red-500">Error</span>}
-                  <span className={cn('text-[10px] font-semibold uppercase tracking-wide', isDarkMode ? 'text-green-400/70' : 'text-green-600')}>NetKathir</span>
+                  <span className={cn('text-[10px] font-semibold uppercase tracking-wide', isDarkMode ? 'text-green-400/70' : 'text-green-600')}>Netkathir</span>
                 </div>
                 <p className="leading-relaxed whitespace-pre-wrap">{errorMessage || responseText || (state === 'thinking' ? 'Processing...' : '')}</p>
               </div>
             )}
           </div>
+        )}
+
+        {state === 'speaking' && (
+          <button
+            type="button"
+            onClick={() => {
+              stopSpeaking();
+              void startListeningRef.current();
+            }}
+            className="mt-5 flex items-center justify-center gap-2 rounded-full bg-red-500 px-7 py-3 text-sm font-semibold text-white shadow-lg transition-all hover:bg-red-600 active:scale-95"
+          >
+            <Mic className="h-4 w-4" />
+            Stop speaking
+          </button>
         )}
 
         <button

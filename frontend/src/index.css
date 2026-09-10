@@ -125,6 +125,21 @@ input:focus-visible, textarea:focus-visible {
 .voice-orb-thinking { animation: voiceOrbThinking 2.2s ease-in-out infinite; }
 .voice-orb-speaking { animation: voiceOrbSpeaking 1.1s ease-in-out infinite; }
 
+.voice-waveform { display: flex; align-items: center; justify-content: center; gap: 4px; height: 28px; }
+.voice-waveform span { width: 3px; height: 8px; border-radius: 999px; background: #22c55e; transform-origin: center; }
+.voice-waveform-listening span { animation: voiceWaveListening 0.9s ease-in-out infinite alternate; }
+.voice-waveform-listening span:nth-child(2n) { animation-delay: 120ms; }
+.voice-waveform-listening span:nth-child(3n) { animation-delay: 240ms; }
+.voice-waveform-speaking span { animation: voiceWaveSpeaking 0.55s ease-in-out infinite alternate; background: #6d7cff; }
+.voice-waveform-speaking span:nth-child(2n) { animation-delay: 100ms; }
+.voice-waveform-speaking span:nth-child(3n) { animation-delay: 180ms; }
+.voice-waveform-thinking span { animation: voiceWaveThinking 1.2s ease-in-out infinite; }
+.voice-waveform-thinking span:nth-child(2n) { animation-delay: 160ms; }
+.voice-waveform-thinking span:nth-child(3n) { animation-delay: 320ms; }
+@keyframes voiceWaveListening { from { transform: scaleY(0.45); } to { transform: scaleY(2.4); } }
+@keyframes voiceWaveSpeaking { from { transform: scaleY(0.7); } to { transform: scaleY(3); } }
+@keyframes voiceWaveThinking { 0%, 100% { opacity: 0.3; transform: scaleY(0.5); } 50% { opacity: 1; transform: scaleY(1.7); } }
+
 /* === Decorative === */
 .font-display { font-family: 'Inter', 'system-ui', sans-serif; }
 .editorial-rule { height: 2px; background: linear-gradient(90deg, transparent 0%, #22C55E 30%, #4ADE80 50%, #22C55E 70%, transparent 100%); opacity: 0.4; border-radius: 2px; }

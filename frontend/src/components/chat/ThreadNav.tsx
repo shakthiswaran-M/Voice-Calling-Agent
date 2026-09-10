@@ -389,9 +389,9 @@ export function ThreadNav() {
           <div className="p-3 pb-2 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <div className="w-12 h-12 rounded-lg overflow-hidden flex items-center justify-center bg-green-50 border border-green-200">
-                <img src={logo} alt="netKathir" className="w-11 h-11 object-contain animate-float" />
+                <img src={logo} alt="Netkathir" className="w-11 h-11 object-contain" />
               </div>
-              <h1 className={cn('text-sm font-bold', isDarkMode ? 'text-white' : 'text-gray-900')}>NetKathir</h1>
+              <h1 className={cn('text-sm font-bold', isDarkMode ? 'text-white' : 'text-gray-900')}>Netkathir</h1>
             </div>
             <button onClick={toggleSidebar} className={cn('p-1.5 rounded-lg transition-all active:scale-95', isDarkMode ? 'hover:bg-white/10 text-white/50' : 'hover:bg-gray-200 text-gray-400')} aria-label="Close sidebar">
               <PanelLeftClose className="w-4 h-4" />
@@ -448,7 +448,7 @@ export function ThreadNav() {
 
           {/* Footer */}
           <div className={cn('px-4 py-2 border-t flex items-center justify-between', isDarkMode ? 'border-white/5' : 'border-gray-200')}>
-            <p className={cn('text-[10px]', isDarkMode ? 'text-white/20' : 'text-gray-400')}>netKathir AI</p>
+            <p className={cn('text-[10px]', isDarkMode ? 'text-white/20' : 'text-gray-400')}>Netkathir AI</p>
             <button onClick={toggleDarkMode} className={cn('p-1.5 rounded-md transition-all', isDarkMode ? 'hover:bg-white/5 text-white/40' : 'hover:bg-gray-200 text-gray-400')} aria-label="Toggle theme">
               {isDarkMode ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
             </button>

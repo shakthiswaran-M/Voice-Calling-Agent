@@ -616,7 +616,7 @@ function drawMessage(state: DocState, msg: { role: 'user' | 'bot'; content: stri
   const padY = 10;
 
   // Label above the bubble.
-  const label = `${isUser ? 'You' : 'NetKathir'} \u00b7 ${formatTime(msg.timestamp)}`;
+  const label = `${isUser ? 'You' : 'Netkathir'} \u00b7 ${formatTime(msg.timestamp)}`;
   const labelH = 11;
   if (state.y + labelH > state.bottom) newPage(state);
   doc.setFont('helvetica', 'bold');

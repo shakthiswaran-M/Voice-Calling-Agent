@@ -7,6 +7,14 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/** Normalize common speech-recognition variants of the product name. */
+export function normalizeNetkathir(text: string): string {
+  return text.replace(
+    /\bnet\s*(?:kathir|kadhir|kadir|cathir)|netkathir|netkadhir|netkadir|netcathir\b/gi,
+    'Netkathir',
+  );
+}
+
 /**
  * Relative timestamp used across the chat UI ("Just now", "5m ago", ...).
  * Lives here (not in the store) so UI components share one implementation.
@@ -55,4 +63,4 @@ export function getThreadShareUrl(threadId: string): string {
  * Gap (ms) after which two consecutive messages get a centered date/time
  * separator — the same rule in the chat UI and the PDF export.
  */
-export const TIMELINE_GAP_MS = 5 * 60 * 1000;
+export const TIMELINE_GAP_MS = 5 * 60 * 1000;
