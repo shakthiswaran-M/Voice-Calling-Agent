@@ -56,6 +56,10 @@ export function SpeechToSpeechMode({
   const wsRecognitionRef = useRef<WSRecognition | null>(null);
   const wsFinalTextRef = useRef('');
   const wsActiveRef = useRef(false);
+  const speechStateRef = useRef<SpeechState>('idle');
+  const interruptionRef = useRef(false);
+  const preferWebSpeechRef = useRef(false);
+  const discardRecordingRef = useRef(false);
 
   // LLM streaming
   const streamBufferRef = useRef('');
@@ -70,7 +74,8 @@ export function SpeechToSpeechMode({
   const sttAbortControllerRef = useRef<AbortController | null>(null);
   const llmAbortControllerRef = useRef<AbortController | null>(null);
   const ttsAudioUrlRef = useRef<string | null>(null);
-  const startListeningRef = useRef<() => Promise<void>>(async () => {});
+  const startListeningRef = useRef<(allowDuringSpeech?: boolean) => Promise<void>>(async () => {});
+  const stopListeningRef = useRef<() => void>(() => {});
   const voiceSessionActiveRef = useRef(false);
   const startBargeInMonitorRef = useRef<() => Promise<void>>(async () => {});
 
@@ -78,6 +83,7 @@ export function SpeechToSpeechMode({
   const { activeThreadId, addMessage, createThread, setThreadSessionId } = useChatStore();
   const activeThreadIdRef = useRef(activeThreadId);
   activeThreadIdRef.current = activeThreadId;
+  speechStateRef.current = state;
   const addMessageRef = useRef(addMessage);
   addMessageRef.current = addMessage;
   const createThreadRef = useRef(createThread);
@@ -146,10 +152,21 @@ export function SpeechToSpeechMode({
     ttsBufferRef.current = '';
   }, [stopBargeInMonitor]);
 
+  const interruptSpeaking = useCallback(() => {
+    if (!voiceSessionActiveRef.current || speechStateRef.current !== 'speaking' || interruptionRef.current) return;
+    interruptionRef.current = true;
+    preferWebSpeechRef.current = true;
+    console.info('[Speech] Interruption detected');
+    stopSpeaking();
+    setState('listening');
+  }, [stopSpeaking]);
+
   const startBargeInMonitor = useCallback(async () => {
     if (!voiceSessionActiveRef.current || bargeInStreamRef.current) return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
       if (!voiceSessionActiveRef.current || !ttsSpeakingRef.current) {
         stream.getTracks().forEach((track) => track.stop());
         return;
@@ -183,16 +200,19 @@ export function SpeechToSpeechMode({
   }, [stopBargeInMonitor, stopSpeaking]);
 
   // ── TTS: sentence-by-sentence with queue ──
-  const speakSentence = useCallback((text: string, turnId: number) => {
+  const speakSentence = useCallback((text: string, turnId: number, listenDuringSpeech = true) => {
     if (!text.trim() || !voiceSessionActiveRef.current || turnIdRef.current !== turnId) return;
     if (ttsSpeakingRef.current) {
       ttsQueueRef.current.push(text);
       return;
     }
+    interruptionRef.current = false;
     ttsSpeakingRef.current = true;
     console.info('[Speech] State → speaking');
     setState('speaking');
-    startBargeInMonitorRef.current();
+    // Keep recognition and the recorder active while TTS plays. Web Speech
+    // interim results provide the earliest browser-level barge-in signal.
+    if (listenDuringSpeech) void startListeningRef.current(true);
 
     const finish = () => {
       stopBargeInMonitor();
@@ -204,13 +224,18 @@ export function SpeechToSpeechMode({
       if (next) {
         speakSentence(next, turnId);
       } else {
+        if (speechStateRef.current === 'listening') return;
+        if (mediaRecorderRef.current) discardRecordingRef.current = true;
+        stopListeningRef.current();
         goToIdle();
-        restartTimerRef.current = window.setTimeout(() => {
-          restartTimerRef.current = null;
-          if (voiceSessionActiveRef.current && turnIdRef.current === turnId) {
-            void startListeningRef.current();
-          }
-        }, 0);
+        if (!listenDuringSpeech) {
+          restartTimerRef.current = window.setTimeout(() => {
+            restartTimerRef.current = null;
+            if (voiceSessionActiveRef.current && turnIdRef.current === turnId) {
+              void startListeningRef.current();
+            }
+          }, 0);
+        }
       }
     };
 
@@ -295,7 +320,12 @@ export function SpeechToSpeechMode({
       }
       if (final) wsFinalTextRef.current += final;
       const display = [wsFinalTextRef.current, interim].filter(Boolean).join(' ').trim();
-      if (display) setTranscript(normalizeNetkathir(display));
+      if (display) {
+        const normalized = normalizeNetkathir(display);
+        setTranscript(normalized);
+        const meaningfulSpeech = normalized.replace(/[^\p{L}\p{N}]/gu, '').length >= 4;
+        if (meaningfulSpeech && speechStateRef.current === 'speaking') interruptSpeaking();
+      }
     };
     rec.onerror = () => {};
     rec.onend = () => {
@@ -305,7 +335,7 @@ export function SpeechToSpeechMode({
     };
 
     try { rec.start(); wsRecognitionRef.current = rec; } catch { /* ignore */ }
-  }, []);
+  }, [interruptSpeaking]);
 
   const stopWsRecognition = useCallback(() => {
     wsActiveRef.current = false;
@@ -377,6 +407,8 @@ export function SpeechToSpeechMode({
     console.info('[Speech] Stop listening');
 
     const wsText = normalizeNetkathir(wsFinalTextRef.current.trim());
+    const useWebSpeech = preferWebSpeechRef.current;
+    preferWebSpeechRef.current = false;
     if (wsText) setTranscript(wsText);
 
     console.info('[Speech] State → thinking');
@@ -391,7 +423,9 @@ export function SpeechToSpeechMode({
     sttAbortControllerRef.current = sttController;
     try {
       console.info('[Speech] Trying Sarvam STT...');
-      finalText = normalizeNetkathir(await transcribeAudio(audioBlob, sttController.signal));
+      finalText = useWebSpeech && wsText
+        ? wsText
+        : normalizeNetkathir(await transcribeAudio(audioBlob, sttController.signal));
       console.info('[Speech] Sarvam transcript:', finalText);
     } catch (err) {
       if (sttController.signal.aborted || !voiceSessionActiveRef.current) return;
@@ -406,12 +440,6 @@ export function SpeechToSpeechMode({
     if (!finalText.trim()) {
       console.info('[Speech] No transcript — returning to idle');
       goToIdle();
-      restartTimerRef.current = window.setTimeout(() => {
-        restartTimerRef.current = null;
-        if (voiceSessionActiveRef.current && turnIdRef.current === currentTurn) {
-          void startListeningRef.current();
-        }
-      }, 0);
       return;
     }
 
@@ -451,12 +479,6 @@ export function SpeechToSpeechMode({
         speakSentence(remaining, currentTurn);
       } else if (!ttsSpeakingRef.current && ttsQueueRef.current.length === 0) {
         goToIdle();
-        restartTimerRef.current = window.setTimeout(() => {
-          restartTimerRef.current = null;
-          if (voiceSessionActiveRef.current && turnIdRef.current === currentTurn) {
-            void startListeningRef.current();
-          }
-        }, 0);
       }
 
       // Add bot message to chat
@@ -478,8 +500,8 @@ export function SpeechToSpeechMode({
   processRecordingRef.current = processRecording;
 
   // ── Start recording ──
-  const startListening = useCallback(async () => {
-    if (!voiceSessionActiveRef.current || processingRef.current || isListening) return;
+  const startListening = useCallback(async (allowDuringSpeech = false) => {
+    if (!voiceSessionActiveRef.current || (processingRef.current && !allowDuringSpeech) || isListening) return;
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -498,7 +520,10 @@ export function SpeechToSpeechMode({
         stopListening();
         stream.getTracks().forEach((t) => t.stop());
         if (mediaStreamRef.current === stream) mediaStreamRef.current = null;
-        if (!voiceSessionActiveRef.current) return;
+        if (!voiceSessionActiveRef.current || discardRecordingRef.current) {
+          discardRecordingRef.current = false;
+          return;
+        }
         const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         void processRecordingRef.current(blob);
       };
@@ -520,6 +545,7 @@ export function SpeechToSpeechMode({
           stopListening();
           return;
         }
+        if (speechStateRef.current === 'speaking') return;
         analyser.getByteTimeDomainData(samples);
         let sum = 0;
         for (const sample of samples) {
@@ -540,7 +566,7 @@ export function SpeechToSpeechMode({
       }, 100);
       setIsListening(true);
       console.info('[Speech] Start listening');
-      setState('listening');
+      if (!allowDuringSpeech) setState('listening');
 
       startWsRecognition();
     } catch (err) {
@@ -550,6 +576,7 @@ export function SpeechToSpeechMode({
   }, [isListening, showError, startWsRecognition, stopListening]);
 
   startListeningRef.current = startListening;
+  stopListeningRef.current = stopListening;
 
   // ── Toggle button ──
   const handleToggle = useCallback(() => {
@@ -585,7 +612,7 @@ export function SpeechToSpeechMode({
       if (!voiceSessionActiveRef.current) return;
       const welcomeText = 'Welcome to Netkathir, how can I help you today?';
       const turn = turnIdRef.current;
-      speakSentence(welcomeText, turn);
+      speakSentence(welcomeText, turn, false);
     }, 400);
     return () => {
       if (welcomeTimerRef.current !== null) {
@@ -670,12 +697,17 @@ export function SpeechToSpeechMode({
             type="button"
             onClick={() => {
               stopSpeaking();
-              void startListeningRef.current();
+              discardRecordingRef.current = true;
+              stopListeningRef.current();
+              interruptionRef.current = false;
+              preferWebSpeechRef.current = false;
+              setTranscript('');
+              setState('idle');
             }}
             className="mt-5 flex items-center justify-center gap-2 rounded-full bg-red-500 px-7 py-3 text-sm font-semibold text-white shadow-lg transition-all hover:bg-red-600 active:scale-95"
           >
-            <Mic className="h-4 w-4" />
-            Stop speaking
+            <MicOff className="h-4 w-4" />
+            Stop
           </button>
         )}
 
