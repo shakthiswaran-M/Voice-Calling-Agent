@@ -48,6 +48,7 @@ export type ChatActions = {
   setActiveThread: (threadId: string) => void;
   addMessage: (threadId: string, message: Omit<Message, 'id' | 'timestamp'>) => string;
   updateMessage: (threadId: string, messageId: string, content: string) => void;
+  removeMessage: (threadId: string, messageId: string) => void;
   setThreadSessionId: (threadId: string, sessionId: string) => void;
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
