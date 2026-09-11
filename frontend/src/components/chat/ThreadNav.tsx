@@ -177,7 +177,7 @@ export function ThreadNav() {
   const renderThreadItem = (thread: Thread) => {
     const isActive = activeThreadId === thread.id;
     return (
-      <div key={thread.id} onClick={() => editingId !== thread.id && handleThreadSelect(thread.id)} className={cn('group/thread relative flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer transition-all duration-150', isActive ? (isDarkMode ? 'bg-white/10 text-white' : 'bg-gray-200 text-gray-900') : (isDarkMode ? 'text-white/60 hover:bg-white/5' : 'text-gray-600 hover:bg-gray-100'))}>
+      <div key={thread.id} onClick={() => editingId !== thread.id && handleThreadSelect(thread.id)} className={cn('group/thread relative flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-all duration-150', isActive ? (isDarkMode ? 'bg-white/10 text-white' : 'bg-gray-200 text-gray-900') : (isDarkMode ? 'text-white/60 hover:bg-white/5' : 'text-gray-600 hover:bg-gray-100'))}>
         <div className="flex-1 min-w-0">
           {editingId === thread.id ? (
             <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
@@ -247,7 +247,7 @@ export function ThreadNav() {
   };
 
   const sectionLabel = (text: string) => (
-    <p className={cn('text-[10px] font-semibold uppercase tracking-wider px-3 pt-3 pb-1', isDarkMode ? 'text-white/25' : 'text-gray-400')}>{text}</p>
+    <p className={cn('text-[10px] font-semibold uppercase tracking-wider px-3 pt-2 pb-1', isDarkMode ? 'text-white/25' : 'text-gray-400')}>{text}</p>
   );
 
   // ─── Popover panel content for pinned/recent threads ───
@@ -385,14 +385,14 @@ export function ThreadNav() {
       {/* ═══ FULL SIDEBAR ═══ */}
       <aside className={cn('chat-sidebar', isSidebarOpen && 'open')}>
         <div className={cn('flex flex-col h-full border-r', isDarkMode ? 'bg-[#171717] border-[#2f2f2f]' : 'bg-[#f9f9f9] border-gray-200')}>
-          {/* Header */}
+          {/* Header — full Netkathir logo (replaces the old icon + wordmark) */}
           <div className="p-3 pb-2 flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="w-12 h-12 rounded-lg overflow-hidden flex items-center justify-center bg-green-50 border border-green-200">
-                <img src={logo} alt="Netkathir" className="w-11 h-11 object-contain" />
-              </div>
-              <h1 className={cn('text-sm font-bold', isDarkMode ? 'text-white' : 'text-gray-900')}>Netkathir</h1>
-            </div>
+            <img
+              src={logo}
+              alt="Netkathir"
+              draggable={false}
+              className="w-44 h-auto object-contain"
+            />
             <button onClick={toggleSidebar} className={cn('p-1.5 rounded-lg transition-all active:scale-95', isDarkMode ? 'hover:bg-white/10 text-white/50' : 'hover:bg-gray-200 text-gray-400')} aria-label="Close sidebar">
               <PanelLeftClose className="w-4 h-4" />
             </button>
@@ -400,7 +400,7 @@ export function ThreadNav() {
 
           {/* New Chat */}
           <div className="px-3 pb-2">
-            <button onClick={handleNewChat} className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all active:scale-[0.98] bg-green-500 text-white hover:bg-green-600">
+            <button onClick={handleNewChat} className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all active:scale-[0.98] bg-green-500 text-white hover:bg-green-600">
               <Plus className="w-4 h-4" strokeWidth={2.5} />
               New chat
             </button>
@@ -420,9 +420,9 @@ export function ThreadNav() {
           </div>
 
           {/* Thread List */}
-          <div className="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
+          <div className="flex-1 overflow-y-auto px-3 py-1 space-y-1">
             {!hasResults ? (
-              <div className="text-center py-12 px-4">
+              <div className="text-center py-10 px-4">
                 <MessageSquare className={cn('w-8 h-8 mx-auto mb-2', isDarkMode ? 'text-white/15' : 'text-gray-300')} />
                 <p className={cn('text-xs', isDarkMode ? 'text-white/40' : 'text-gray-400')}>
                   {searchQuery ? 'No results' : 'No conversations yet'}
@@ -431,13 +431,13 @@ export function ThreadNav() {
             ) : (
               <>
                 {filteredPinned.length > 0 && (
-                  <div>
+                  <div className="space-y-1">
                     {sectionLabel('Pinned')}
                     {filteredPinned.map(renderThreadItem)}
                   </div>
                 )}
                 {filteredRecent.length > 0 && (
-                  <div>
+                  <div className="space-y-1">
                     {sectionLabel('Recent')}
                     {filteredRecent.map(renderThreadItem)}
                   </div>
@@ -447,7 +447,7 @@ export function ThreadNav() {
           </div>
 
           {/* Footer */}
-          <div className={cn('px-4 py-2 border-t flex items-center justify-between', isDarkMode ? 'border-white/5' : 'border-gray-200')}>
+          <div className={cn('px-3 py-2 border-t flex items-center justify-between', isDarkMode ? 'border-white/5' : 'border-gray-200')}>
             <p className={cn('text-[10px]', isDarkMode ? 'text-white/20' : 'text-gray-400')}>Netkathir AI</p>
             <button onClick={toggleDarkMode} className={cn('p-1.5 rounded-md transition-all', isDarkMode ? 'hover:bg-white/5 text-white/40' : 'hover:bg-gray-200 text-gray-400')} aria-label="Toggle theme">
               {isDarkMode ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}

@@ -6,7 +6,7 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Copy, Check, User, Volume2, Square, Share2, Pin } from 'lucide-react';
 import { cn, formatTimestamp } from '../../lib/utils';
-import logo from '../../assets/netkathir-logo.png';
+import logo from '../../assets/chatlogo.png';
 
 export type TtsState = 'idle' | 'playing' | 'paused';
 
@@ -165,9 +165,7 @@ export const MessageBubble = memo(function MessageBubble({
           )}
           {/* Header */}
           <div className="flex items-center gap-2 mb-2">
-            <div className={cn("w-6 h-6 rounded-lg flex items-center justify-center overflow-hidden", isDarkMode ? "bg-[#2f2f2f] border border-[#424242]" : "bg-green-50 border border-green-200")}>
-              <img src={logo} alt="" className="w-full h-full object-contain p-0.5" />
-            </div>
+            <img src={logo} alt="" draggable={false} className="h-6 w-auto object-contain" />
             <span className={cn("text-[10px] font-semibold tracking-wider uppercase", isDarkMode ? "text-green-400/70" : "text-green-600")}>Netiva</span>
             <span className={cn("text-[10px] font-medium tracking-wider uppercase", isDarkMode ? "text-white/25" : "text-midnight-300")}>{formatTimestamp(message.timestamp)}</span>
           </div>
