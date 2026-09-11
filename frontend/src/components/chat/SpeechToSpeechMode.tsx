@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { LoaderCircle, Mic, MicOff, Volume2, X } from 'lucide-react';
+import { ArrowDown, LoaderCircle, Mic, MicOff, Volume2, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { speechSynthesisService } from '../../lib/speechSynthesisService';
 import { sendChatMessageStream, transcribeAudio, synthesizeSpeech, ApiError } from '../../lib/api';
@@ -39,6 +39,7 @@ export function SpeechToSpeechMode({
   const [responseText, setResponseText] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [isListening, setIsListening] = useState(false);
+  const [isResponseAtBottom, setIsResponseAtBottom] = useState(true);
 
   // ── Refs ──
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -51,6 +52,8 @@ export function SpeechToSpeechMode({
   const bargeInTimerRef = useRef<number | null>(null);
   const restartTimerRef = useRef<number | null>(null);
   const welcomeTimerRef = useRef<number | null>(null);
+  const responseContainerRef = useRef<HTMLDivElement | null>(null);
+  const isResponseAtBottomRef = useRef(true);
 
   // Web Speech — runs in parallel during recording for live display + fallback
   const wsRecognitionRef = useRef<WSRecognition | null>(null);
@@ -103,6 +106,8 @@ export function SpeechToSpeechMode({
     ttsBufferRef.current = '';
     ttsSpeakingRef.current = false;
     ttsQueueRef.current = [];
+    isResponseAtBottomRef.current = true;
+    setIsResponseAtBottom(true);
   }, []);
 
   const showError = useCallback((msg: string) => {
@@ -454,6 +459,8 @@ export function SpeechToSpeechMode({
     console.info('[Speech] LLM started');
     streamBufferRef.current = '';
     ttsBufferRef.current = '';
+    isResponseAtBottomRef.current = true;
+    setIsResponseAtBottom(true);
     setResponseText('');
 
     try {
@@ -614,7 +621,7 @@ export function SpeechToSpeechMode({
     welcomeTimerRef.current = window.setTimeout(() => {
       welcomeTimerRef.current = null;
       if (!voiceSessionActiveRef.current) return;
-      const welcomeText = 'Welcome to Netkathir, how can I help you today?';
+      const welcomeText = 'Hi! I’m Netiva, your AI assistant from Netkathir Technologies. How can I help you today?';
       const turn = turnIdRef.current;
       speakSentence(welcomeText, turn, false);
     }, 400);
@@ -625,6 +632,27 @@ export function SpeechToSpeechMode({
       }
     };
   }, [isOpen, goToIdle, speakSentence, stopVoiceSession]);
+
+  useEffect(() => {
+    const element = responseContainerRef.current;
+    if (!element) return;
+
+    const handleScroll = () => {
+      const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 40;
+      isResponseAtBottomRef.current = atBottom;
+      setIsResponseAtBottom(atBottom);
+    };
+
+    element.addEventListener('scroll', handleScroll, { passive: true });
+    handleScroll();
+    return () => element.removeEventListener('scroll', handleScroll);
+  }, [state]);
+
+  useEffect(() => {
+    const element = responseContainerRef.current;
+    if (!element || !isResponseAtBottomRef.current) return;
+    element.scrollTo({ top: element.scrollHeight, behavior: 'auto' });
+  }, [responseText]);
 
   if (!isOpen) return null;
 
@@ -690,7 +718,32 @@ export function SpeechToSpeechMode({
                   {state === 'error' && <span className="text-red-500">Error</span>}
                   <span className={cn('text-[10px] font-semibold uppercase tracking-wide', isDarkMode ? 'text-green-400/70' : 'text-green-600')}>Netkathir</span>
                 </div>
-                <p className="leading-relaxed whitespace-pre-wrap">{errorMessage || responseText || (state === 'thinking' ? 'Processing...' : '')}</p>
+                <div
+                  ref={responseContainerRef}
+                  className="min-h-0 max-h-[42dvh] overflow-y-auto overscroll-contain pr-1 [scrollbar-width:thin] sm:max-h-[22rem]"
+                >
+                  <p className="leading-relaxed whitespace-pre-wrap">{errorMessage || responseText || (state === 'thinking' ? 'Processing...' : '')}</p>
+                </div>
+                {!isResponseAtBottom && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const element = responseContainerRef.current;
+                      if (!element) return;
+                      isResponseAtBottomRef.current = true;
+                      setIsResponseAtBottom(true);
+                      element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' });
+                    }}
+                    className={cn(
+                      'mt-2 flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors',
+                      isDarkMode ? 'bg-white/10 text-white/75 hover:bg-white/15' : 'bg-green-100 text-green-700 hover:bg-green-200',
+                    )}
+                    aria-label="Scroll to newest response text"
+                  >
+                    <ArrowDown className="h-3 w-3" />
+                    New text
+                  </button>
+                )}
               </div>
             )}
           </div>
