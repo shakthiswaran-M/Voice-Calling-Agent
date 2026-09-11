@@ -95,6 +95,20 @@ export const useChatStore = create<ChatStore>()(
         }));
       },
 
+      removeMessage: (threadId: string, messageId: string) => {
+        set((state) => ({
+          threads: state.threads.map((t) =>
+            t.id === threadId
+              ? {
+                  ...t,
+                  messages: t.messages.filter((message) => message.id !== messageId),
+                  updatedAt: Date.now(),
+                }
+              : t
+          ),
+        }));
+      },
+
       setThreadSessionId: (threadId: string, sessionId: string) => {
         set((state) => ({
           threads: state.threads.map((t) =>

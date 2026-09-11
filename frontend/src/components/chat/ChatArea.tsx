@@ -25,7 +25,7 @@ export function ChatArea() {
     threads, activeThreadId, addMessage, createThread, updateThreadTitle,
     setThreadSessionId, toggleSidebar, isDarkMode, saveScrollPosition,
     scrollPositions, markThreadRead, incrementUnread, togglePinMessage,
-    setReplyTo, 
+    setReplyTo, removeMessage,
   } = useChatStore();
   const activeThread = threads.find((t) => t.id === activeThreadId);
   const messages = activeThread?.messages || [];
@@ -66,6 +66,7 @@ export function ChatArea() {
 
   // ── TTS ──
   const [isSending, setIsSending] = useState(false);
+  const [pendingAssistantMessageId, setPendingAssistantMessageId] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [speechToSpeechOpen, setSpeechToSpeechOpen] = useState(false);
   const [ttsMsgId, setTtsMsgId] = useState<string | null>(null);
@@ -270,14 +271,17 @@ export function ChatArea() {
     scrollToBottomOnSend();
     setReplyTo(threadId, null);
     setIsSending(true);
+    let botMessageId: string | null = null;
+    let streamedReply = '';
     try {
-      const botMessageId = addMessage(threadId, { role: 'bot', content: '' });
-      let streamedReply = '';
+      const placeholderId = addMessage(threadId, { role: 'bot', content: '' });
+      botMessageId = placeholderId;
+      setPendingAssistantMessageId(placeholderId);
       const session_id = await sendChatMessageStream(
         content,
         (chunk) => {
           streamedReply += chunk;
-          useChatStore.getState().updateMessage(threadId, botMessageId, streamedReply);
+          useChatStore.getState().updateMessage(threadId, placeholderId, streamedReply);
         },
         thread?.sessionId,
       );
@@ -285,8 +289,20 @@ export function ChatArea() {
       if (!thread?.sessionId && session_id) setThreadSessionId(threadId, session_id);
     } catch (err) {
       const message = err instanceof ApiError ? err.message : FALLBACK_ERROR_RESPONSE;
-      addMessage(threadId, { role: 'bot', content: message });
-    } finally { setIsSending(false); }
+      if (botMessageId) {
+        if (streamedReply.trim()) {
+          useChatStore.getState().updateMessage(threadId, botMessageId, `${streamedReply}\n\n${message}`);
+        } else {
+          removeMessage(threadId, botMessageId);
+          addMessage(threadId, { role: 'bot', content: message });
+        }
+      } else {
+        addMessage(threadId, { role: 'bot', content: message });
+      }
+    } finally {
+      setPendingAssistantMessageId(null);
+      setIsSending(false);
+    }
   };
 
 
@@ -580,6 +596,7 @@ export function ChatArea() {
                       message={msg}
                       index={i}
                       isDarkMode={isDarkMode}
+                      isPending={msg.id === pendingAssistantMessageId}
                       ttsState={msgTtsState}
                       onTtsPlay={isBotMsg ? playTts : undefined}
                       onTtsPause={isBotMsg && msgTtsState === 'playing' ? pauseTts : undefined}
@@ -592,23 +609,6 @@ export function ChatArea() {
                   </div>
                 );
               })}
-              {isSending && (
-                <div className="w-full msg-slide-left">
-                  <div className="max-w-[85%] md:max-w-[72%]">
-                    <div className={cn('flex items-center gap-2 mb-2')}>
-                      <div className={cn('w-5 h-5 sm:w-6 sm:h-6 rounded-md flex items-center justify-center overflow-hidden', isDarkMode ? 'bg-green-500/10 border border-green-500/20' : 'bg-green-50 border border-green-200')}>
-                        <img src={logo} alt="" className="w-full h-full object-contain p-0.5" />
-                      </div>
-                      <span className={cn('text-[10px] font-semibold tracking-wider uppercase', isDarkMode ? 'text-green-400/70' : 'text-green-600')}>Netkathir</span>
-                    </div>
-                    <div className={cn('rounded-2xl rounded-tl-md px-5 py-4 flex items-center gap-2', isDarkMode ? 'bg-green-500/5 border border-green-500/10' : 'bg-white border border-green-100 shadow-card')}>
-                      <span className="typing-dot" />
-                      <span className="typing-dot" />
-                      <span className="typing-dot" />
-                    </div>
-                  </div>
-                </div>
-              )}
               {isScrolledUp && (
                 <div className="flex justify-center sticky bottom-4 z-10 animate-fade-in-up">
                   <button onClick={() => { setRestorationTarget(null); scrollToBottom(true); }} className={cn('flex items-center gap-2 px-4 py-2 backdrop-blur-sm text-white rounded-full shadow-lg transition-all duration-300 active:scale-95 hover:shadow-xl', isDarkMode ? 'bg-green-500/90 shadow-[0_4px_20px_rgba(34,197,94,0.3)]' : 'bg-green-600 shadow-[0_4px_20px_rgba(22,163,74,0.25)]')}>
