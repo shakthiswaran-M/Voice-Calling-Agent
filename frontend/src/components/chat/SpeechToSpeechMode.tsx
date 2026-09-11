@@ -504,7 +504,13 @@ export function SpeechToSpeechMode({
     if (!voiceSessionActiveRef.current || (processingRef.current && !allowDuringSpeech) || isListening) return;
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      let stream = mediaStreamRef.current;
+      if (!stream || stream.getTracks().every((track) => track.readyState === 'ended')) {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        });
+        mediaStreamRef.current = stream;
+      }
       if (!voiceSessionActiveRef.current) {
         stream.getTracks().forEach((track) => track.stop());
         return;
@@ -518,8 +524,6 @@ export function SpeechToSpeechMode({
       };
       recorder.onstop = () => {
         stopListening();
-        stream.getTracks().forEach((t) => t.stop());
-        if (mediaStreamRef.current === stream) mediaStreamRef.current = null;
         if (!voiceSessionActiveRef.current || discardRecordingRef.current) {
           discardRecordingRef.current = false;
           return;

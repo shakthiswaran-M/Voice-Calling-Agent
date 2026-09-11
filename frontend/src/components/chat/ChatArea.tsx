@@ -11,7 +11,7 @@ import { useAutoScroll } from '../../hooks/useAutoScroll';
 import { ArrowDown, Menu, Search, Printer, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn, normalizeNetkathir, TIMELINE_GAP_MS } from '../../lib/utils';
 import { webmBlobToWav } from '../../lib/audioWav';
-import { sendChatMessage, transcribeAudio, synthesizeSpeech, ApiError } from '../../lib/api';
+import { sendChatMessage, sendChatMessageStream, transcribeAudio, synthesizeSpeech, ApiError } from '../../lib/api';
 import { cancelBrowserTts, speakWithBrowserTts } from '../../lib/browserTts';
 import { ShareModal } from './ShareModal';
 import logo from '../../assets/netkathir-logo.png';
@@ -271,9 +271,18 @@ export function ChatArea() {
     setReplyTo(threadId, null);
     setIsSending(true);
     try {
-      const { reply, session_id } = await sendChatMessage(content, thread?.sessionId);
-      if (!thread?.sessionId) setThreadSessionId(threadId, session_id);
-      addMessage(threadId, { role: 'bot', content: reply || "(no response)" });
+      const botMessageId = addMessage(threadId, { role: 'bot', content: '' });
+      let streamedReply = '';
+      const session_id = await sendChatMessageStream(
+        content,
+        (chunk) => {
+          streamedReply += chunk;
+          useChatStore.getState().updateMessage(threadId, botMessageId, streamedReply);
+        },
+        thread?.sessionId,
+      );
+      if (!streamedReply) useChatStore.getState().updateMessage(threadId, botMessageId, '(no response)');
+      if (!thread?.sessionId && session_id) setThreadSessionId(threadId, session_id);
     } catch (err) {
       const message = err instanceof ApiError ? err.message : FALLBACK_ERROR_RESPONSE;
       addMessage(threadId, { role: 'bot', content: message });
