@@ -102,8 +102,8 @@ type WSW = Window & {
 // Configuration
 // ─────────────────────────────────────────────────────────────────────────────
 
-const SPEECH_VOLUME_THRESHOLD = 0.045;
-const SILENCE_VOLUME_THRESHOLD = 0.02;
+const SPEECH_VOLUME_THRESHOLD = 0.06;
+const SILENCE_VOLUME_THRESHOLD = 0.04;
 const SILENCE_DURATION_MS = 800;
 const MAX_LISTEN_MS = 15000;
 
@@ -1058,6 +1058,12 @@ export function SpeechToSpeechMode({
 
     recognition.onresult = (event) => {
       if (!wsActiveRef.current) {
+        return;
+      }
+
+      const currentVolume = silenceMeterRef.current?.getVolume() ?? 0;
+
+      if (currentVolume < SPEECH_VOLUME_THRESHOLD) {
         return;
       }
 
