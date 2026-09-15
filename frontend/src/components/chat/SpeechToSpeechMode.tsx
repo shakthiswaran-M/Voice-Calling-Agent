@@ -102,7 +102,8 @@ type WSW = Window & {
 // Configuration
 // ─────────────────────────────────────────────────────────────────────────────
 
-const SILENCE_VOLUME_THRESHOLD = 0.025;
+const SPEECH_VOLUME_THRESHOLD = 0.045;
+const SILENCE_VOLUME_THRESHOLD = 0.02;
 const SILENCE_DURATION_MS = 800;
 const MAX_LISTEN_MS = 15000;
 
@@ -197,6 +198,10 @@ export function SpeechToSpeechMode({
 
   const silenceTimerRef = useRef<number | null>(null);
 
+  const speechDetectedRef = useRef(false);
+
+  const currentSpeakingTextRef = useRef('');
+
   const bargeInMeterRef =
     useRef<ReturnType<typeof createVolumeMeter> | null>(null);
 
@@ -279,6 +284,8 @@ export function SpeechToSpeechMode({
   );
 
   const interruptThinkingRef = useRef<() => void>(() => {});
+
+  const startWsRecognitionRef = useRef<() => void>(() => {});
 
   // ───────────────────────────────────────────────────────────────────────────
   // Chat store
@@ -468,6 +475,8 @@ export function SpeechToSpeechMode({
   const stopSpeaking = useCallback(() => {
     console.info('[Speech] Stopping TTS');
 
+    stopWsRecognition();
+
     turnIdRef.current += 1;
 
     processingRef.current = false;
@@ -513,7 +522,7 @@ export function SpeechToSpeechMode({
     ttsBufferRef.current = '';
 
     streamBufferRef.current = '';
-  }, [stopBargeInMonitor]);
+  }, [stopBargeInMonitor, stopWsRecognition]);
 
   // ───────────────────────────────────────────────────────────────────────────
   // Interrupt speaking
@@ -583,20 +592,19 @@ export function SpeechToSpeechMode({
 
       setState('speaking');
 
-      // Stop any thinking-phase recognition (started to allow
-      // interrupting the LLM while it was "thinking") — it must not
-      // keep running once TTS audio starts playing, or it would pick
-      // up the assistant's own voice and misread it as the user.
+      currentSpeakingTextRef.current = text;
+
+      // Restart recognition for this sentence so live barge-in
+      // detection works during TTS playback too. This does NOT
+      // reopen the raw MediaRecorder pipeline (no STT/LLM feed) —
+      // it only listens for live speech, and the onresult handler
+      // below compares what it hears against the text the bot is
+      // currently speaking to avoid reacting to its own echoed
+      // voice. See startWsRecognition's onresult handler.
       stopWsRecognition();
 
-      // NOTE: We intentionally do NOT start full mic recording +
-      // live speech recognition here anymore. Doing so let the
-      // assistant's own TTS audio get picked up by the mic and
-      // transcribed, which was fed back into STT/LLM as if it were
-      // a real user message — causing the assistant to respond to
-      // its own voice. Automatic volume-based barge-in was removed
-      // for the same reason. Interruption is manual only now, via
-      // the Stop button (handleStopTts).
+      startWsRecognitionRef.current();
+
       void listenDuringSpeech;
 
       const onSentenceDone = () => {
@@ -624,6 +632,8 @@ export function SpeechToSpeechMode({
 
         // TTS queue is finished.
         processingRef.current = false;
+
+        stopWsRecognition();
 
         if (
           speechStateRef.current === 'listening'
@@ -654,6 +664,19 @@ export function SpeechToSpeechMode({
       };
 
       const speakWithBrowserFallback = () => {
+        // If this turn has been superseded (interrupted, a new
+        // question started, or the session ended), do NOT speak —
+        // this fallback used to fire even on an intentional abort
+        // (e.g. the fetch being cancelled mid-stream), which made
+        // the assistant keep speaking a stale answer after the user
+        // had already moved on to a new one.
+        if (
+          !voiceSessionActiveRef.current ||
+          turnIdRef.current !== turnId
+        ) {
+          return;
+        }
+
         if (!('speechSynthesis' in window)) {
           onSentenceDone();
 
@@ -1084,10 +1107,6 @@ export function SpeechToSpeechMode({
       const normalized =
         normalizeNetkathir(display);
 
-      // THIS is the live UI update.
-      // Interim browser recognition is shown immediately.
-      setTranscript(normalized);
-
       const meaningfulSpeech =
         normalized.replace(
           /[^\p{L}\p{N}]/gu,
@@ -1095,12 +1114,45 @@ export function SpeechToSpeechMode({
         ).length >=
         MEANINGFUL_SPEECH_MIN_CHARS;
 
-      if (meaningfulSpeech) {
-        if (speechStateRef.current === 'speaking') {
+      if (speechStateRef.current === 'speaking') {
+        // Compare what the mic heard against what the bot is
+        // currently saying. Without headphones, the mic can pick
+        // up the TTS audio itself — if the recognized text is
+        // basically contained in the bot's own current sentence,
+        // treat it as an echo and ignore it rather than
+        // interrupting the bot's own voice.
+        const heard = normalized
+          .toLowerCase()
+          .replace(/[^\p{L}\p{N}\s]/gu, '')
+          .trim();
+
+        const spoken =
+          currentSpeakingTextRef.current
+            .toLowerCase()
+            .replace(/[^\p{L}\p{N}\s]/gu, '')
+            .trim();
+
+        const isLikelyEcho =
+          heard.length > 0 &&
+          spoken.includes(heard);
+
+        if (meaningfulSpeech && !isLikelyEcho) {
           interruptSpeaking();
-        } else if (speechStateRef.current === 'thinking') {
-          interruptThinkingRef.current();
         }
+
+        // Don't show possibly-echoed text as the live transcript.
+        return;
+      }
+
+      // THIS is the live UI update.
+      // Interim browser recognition is shown immediately.
+      setTranscript(normalized);
+
+      if (
+        meaningfulSpeech &&
+        speechStateRef.current === 'thinking'
+      ) {
+        interruptThinkingRef.current();
       }
     };
 
@@ -1174,6 +1226,8 @@ export function SpeechToSpeechMode({
       wsRecognitionRef.current = null;
     }
   }, [interruptSpeaking]);
+
+  startWsRecognitionRef.current = startWsRecognition;
 
   // ───────────────────────────────────────────────────────────────────────────
   // (stopWsRecognition moved above, near goToIdle)
@@ -1733,6 +1787,16 @@ export function SpeechToSpeechMode({
             return;
           }
 
+          if (!speechDetectedRef.current) {
+            console.info(
+              '[Speech] No speech volume detected — skipping STT',
+            );
+
+            void startListeningRef.current();
+
+            return;
+          }
+
           void processRecordingRef.current(
             audioBlob,
           );
@@ -1756,7 +1820,7 @@ export function SpeechToSpeechMode({
         const startedAt =
           performance.now();
 
-        let speechDetected = false;
+        speechDetectedRef.current = false;
 
         let silenceStartedAt:
           number | null = null;
@@ -1795,14 +1859,16 @@ export function SpeechToSpeechMode({
 
             if (
               volume >
-              SILENCE_VOLUME_THRESHOLD
+              SPEECH_VOLUME_THRESHOLD
             ) {
-              speechDetected = true;
+              speechDetectedRef.current = true;
 
               silenceStartedAt =
                 null;
             } else if (
-              speechDetected
+              speechDetectedRef.current &&
+              volume <
+                SILENCE_VOLUME_THRESHOLD
             ) {
               silenceStartedAt ??= now;
 
@@ -1814,6 +1880,7 @@ export function SpeechToSpeechMode({
                 stopListening();
               }
             } else if (
+              !speechDetectedRef.current &&
               now - startedAt >=
               MAX_LISTEN_MS
             ) {
