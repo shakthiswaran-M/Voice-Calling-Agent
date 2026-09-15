@@ -103,10 +103,9 @@ type WSW = Window & {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SILENCE_VOLUME_THRESHOLD = 0.025;
-const SILENCE_DURATION_MS = 1200;
+const SILENCE_DURATION_MS = 800;
 const MAX_LISTEN_MS = 15000;
 
-const BARGE_IN_VOLUME_THRESHOLD = 0.055;
 const VOLUME_POLL_INTERVAL_MS = 100;
 
 const MEANINGFUL_SPEECH_MIN_CHARS = 4;
@@ -279,6 +278,8 @@ export function SpeechToSpeechMode({
     async () => {},
   );
 
+  const interruptThinkingRef = useRef<() => void>(() => {});
+
   // ───────────────────────────────────────────────────────────────────────────
   // Chat store
   // ───────────────────────────────────────────────────────────────────────────
@@ -309,11 +310,90 @@ export function SpeechToSpeechMode({
   speechStateRef.current = state;
 
   // ───────────────────────────────────────────────────────────────────────────
-  // State helpers
+  // Stop Web Speech recognition
+  // ───────────────────────────────────────────────────────────────────────────
+
+  const stopWsRecognition = useCallback(() => {
+    wsActiveRef.current = false;
+
+    wsStartingRef.current = false;
+
+    if (wsRestartTimerRef.current !== null) {
+      window.clearTimeout(wsRestartTimerRef.current);
+
+      wsRestartTimerRef.current = null;
+    }
+
+    const recognition = wsRecognitionRef.current;
+
+    if (recognition) {
+      recognition.onresult = null;
+
+      recognition.onerror = null;
+
+      recognition.onend = null;
+
+      try {
+        recognition.abort();
+      } catch {
+        // Ignore browser-specific abort errors.
+      }
+    }
+
+    wsRecognitionRef.current = null;
+  }, []);
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Interrupt while thinking (LLM generating, TTS not started yet)
+  //
+  // Safe to do automatically here — no TTS audio is playing yet, so
+  // there is no echo risk. If the user starts talking again while
+  // the assistant is still "thinking" about their last message, drop
+  // that in-flight request and start listening fresh.
+  // ───────────────────────────────────────────────────────────────────────────
+
+  const interruptThinking = useCallback(() => {
+    if (
+      !voiceSessionActiveRef.current ||
+      speechStateRef.current !== 'thinking' ||
+      interruptionRef.current
+    ) {
+      return;
+    }
+
+    interruptionRef.current = true;
+
+    console.info(
+      '[Speech] Interrupted during thinking — restarting listening',
+    );
+
+    turnIdRef.current += 1;
+
+    sttAbortControllerRef.current?.abort();
+
+    sttAbortControllerRef.current = null;
+
+    llmAbortControllerRef.current?.abort();
+
+    llmAbortControllerRef.current = null;
+
+    processingRef.current = false;
+
+    stopWsRecognition();
+
+    setState('listening');
+
+    void startListeningRef.current();
+  }, [stopWsRecognition]);
+
+  interruptThinkingRef.current = interruptThinking;
+
   // ───────────────────────────────────────────────────────────────────────────
 
   const goToIdle = useCallback(() => {
     console.info('[Speech] State → idle');
+
+    stopWsRecognition();
 
     setState('idle');
 
@@ -338,12 +418,14 @@ export function SpeechToSpeechMode({
     isResponseAtBottomRef.current = true;
 
     setIsResponseAtBottom(true);
-  }, []);
+  }, [stopWsRecognition]);
 
   const showError = useCallback((message: string) => {
     if (!voiceSessionActiveRef.current) return;
 
     console.info('[Speech] State → error:', message);
+
+    stopWsRecognition();
 
     processingRef.current = false;
 
@@ -356,7 +438,7 @@ export function SpeechToSpeechMode({
     setErrorMessage(message);
 
     setState('error');
-  }, []);
+  }, [stopWsRecognition]);
 
   // ───────────────────────────────────────────────────────────────────────────
   // Barge-in monitor
@@ -461,57 +543,13 @@ export function SpeechToSpeechMode({
 
   // ───────────────────────────────────────────────────────────────────────────
   // Barge-in monitor
+  //
+  // NOTE: Automatic volume-based barge-in was removed. Without
+  // headphones, the mic reliably picked up the assistant's own TTS
+  // audio and misread it as the user speaking, causing the assistant
+  // to interrupt itself mid-sentence. Interruption is now manual only,
+  // via the Stop button (see handleStopTts below).
   // ───────────────────────────────────────────────────────────────────────────
-
-  const startBargeInMonitor = useCallback(async () => {
-    if (
-      !voiceSessionActiveRef.current ||
-      bargeInStreamRef.current ||
-      !ttsSpeakingRef.current
-    ) {
-      return;
-    }
-
-    try {
-      const stream =
-        await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS);
-
-      if (
-        !voiceSessionActiveRef.current ||
-        !ttsSpeakingRef.current
-      ) {
-        stream.getTracks().forEach((track) => track.stop());
-
-        return;
-      }
-
-      bargeInStreamRef.current = stream;
-
-      bargeInMeterRef.current = createVolumeMeter(stream);
-
-      bargeInTimerRef.current = window.setInterval(() => {
-        if (
-          !voiceSessionActiveRef.current ||
-          !ttsSpeakingRef.current
-        ) {
-          stopBargeInMonitor();
-
-          return;
-        }
-
-        const volume =
-          bargeInMeterRef.current?.getVolume() ?? 0;
-
-        if (volume > BARGE_IN_VOLUME_THRESHOLD) {
-          stopSpeaking();
-
-          void startListeningRef.current();
-        }
-      }, VOLUME_POLL_INTERVAL_MS);
-    } catch {
-      // Barge-in monitoring is optional.
-    }
-  }, [stopBargeInMonitor, stopSpeaking]);
 
   // ───────────────────────────────────────────────────────────────────────────
   // TTS
@@ -545,10 +583,21 @@ export function SpeechToSpeechMode({
 
       setState('speaking');
 
-      // Start listening while the assistant speaks.
-      if (listenDuringSpeech) {
-        void startListeningRef.current(true);
-      }
+      // Stop any thinking-phase recognition (started to allow
+      // interrupting the LLM while it was "thinking") — it must not
+      // keep running once TTS audio starts playing, or it would pick
+      // up the assistant's own voice and misread it as the user.
+      stopWsRecognition();
+
+      // NOTE: We intentionally do NOT start full mic recording +
+      // live speech recognition here anymore. Doing so let the
+      // assistant's own TTS audio get picked up by the mic and
+      // transcribed, which was fed back into STT/LLM as if it were
+      // a real user message — causing the assistant to respond to
+      // its own voice. Automatic volume-based barge-in was removed
+      // for the same reason. Interruption is manual only now, via
+      // the Stop button (handleStopTts).
+      void listenDuringSpeech;
 
       const onSentenceDone = () => {
         stopBargeInMonitor();
@@ -624,6 +673,207 @@ export function SpeechToSpeechMode({
         });
       };
 
+      const playBlobFallback = async (
+        response: Response,
+      ) => {
+        const audioBlob = await response.blob();
+
+        const audioUrl =
+          URL.createObjectURL(audioBlob);
+
+        if (
+          !voiceSessionActiveRef.current ||
+          turnIdRef.current !== turnId
+        ) {
+          URL.revokeObjectURL(audioUrl);
+
+          return;
+        }
+
+        const audio = new Audio(audioUrl);
+
+        ttsAudioRef.current = audio;
+
+        ttsAudioUrlRef.current = audioUrl;
+
+        audio.onended = () => {
+          URL.revokeObjectURL(audioUrl);
+
+          ttsAudioUrlRef.current = null;
+
+          onSentenceDone();
+        };
+
+        audio.onerror = () => {
+          URL.revokeObjectURL(audioUrl);
+
+          ttsAudioUrlRef.current = null;
+
+          if (voiceSessionActiveRef.current) {
+            speakWithBrowserFallback();
+          }
+        };
+
+        await audio.play();
+      };
+
+      const playStreamed = async (
+        response: Response,
+      ): Promise<boolean> => {
+        const mimeType = 'audio/mpeg';
+
+        if (
+          typeof MediaSource === 'undefined' ||
+          !MediaSource.isTypeSupported(mimeType) ||
+          !response.body
+        ) {
+          return false;
+        }
+
+        const mediaSource = new MediaSource();
+
+        const audioUrl =
+          URL.createObjectURL(mediaSource);
+
+        const audio = new Audio(audioUrl);
+
+        ttsAudioRef.current = audio;
+
+        ttsAudioUrlRef.current = audioUrl;
+
+        let settled = false;
+
+        audio.onended = () => {
+          URL.revokeObjectURL(audioUrl);
+
+          ttsAudioUrlRef.current = null;
+
+          onSentenceDone();
+        };
+
+        audio.onerror = () => {
+          URL.revokeObjectURL(audioUrl);
+
+          ttsAudioUrlRef.current = null;
+
+          if (
+            !settled &&
+            voiceSessionActiveRef.current
+          ) {
+            speakWithBrowserFallback();
+          }
+        };
+
+        await new Promise<void>((resolve) => {
+          mediaSource.addEventListener(
+            'sourceopen',
+            async () => {
+              try {
+                const sourceBuffer =
+                  mediaSource.addSourceBuffer(
+                    mimeType,
+                  );
+
+                const reader =
+                  response.body!.getReader();
+
+                // Once the very first chunk lands,
+                // start playback — the browser will
+                // keep pace with buffered data as
+                // more chunks arrive.
+                let started = false;
+
+                const pump =
+                  async (): Promise<void> => {
+                    const { done, value } =
+                      await reader.read();
+
+                    if (
+                      !voiceSessionActiveRef.current ||
+                      turnIdRef.current !== turnId
+                    ) {
+                      settled = true;
+
+                      try {
+                        await reader.cancel();
+                      } catch {
+                        // Ignore — session already ended.
+                      }
+
+                      return;
+                    }
+
+                    if (done) {
+                      if (
+                        mediaSource.readyState ===
+                        'open'
+                      ) {
+                        mediaSource.endOfStream();
+                      }
+
+                      return;
+                    }
+
+                    await new Promise<void>(
+                      (
+                        resolveAppend,
+                        rejectAppend,
+                      ) => {
+                        sourceBuffer.addEventListener(
+                          'updateend',
+                          () => resolveAppend(),
+                          { once: true },
+                        );
+
+                        sourceBuffer.addEventListener(
+                          'error',
+                          () =>
+                            rejectAppend(
+                              new Error(
+                                'sourceBuffer append failed',
+                              ),
+                            ),
+                          { once: true },
+                        );
+
+                        sourceBuffer.appendBuffer(
+                          value,
+                        );
+                      },
+                    );
+
+                    if (!started) {
+                      started = true;
+
+                      void audio.play();
+                    }
+
+                    await pump();
+                  };
+
+                await pump();
+              } catch (error) {
+                settled = true;
+
+                console.warn(
+                  '[Speech] Streamed TTS playback failed, falling back:',
+                  error,
+                );
+
+                if (voiceSessionActiveRef.current) {
+                  speakWithBrowserFallback();
+                }
+              } finally {
+                resolve();
+              }
+            },
+            { once: true },
+          );
+        });
+
+        return true;
+      };
+
       const speakWithElevenLabs = async () => {
         const controller = new AbortController();
 
@@ -642,47 +892,19 @@ export function SpeechToSpeechMode({
             return;
           }
 
-          const audioBlob = await response.blob();
+          const streamed =
+            await playStreamed(response.clone());
 
-          const audioUrl =
-            URL.createObjectURL(audioBlob);
-
-          if (
-            !voiceSessionActiveRef.current ||
-            turnIdRef.current !== turnId
-          ) {
-            URL.revokeObjectURL(audioUrl);
-
-            return;
+          if (!streamed) {
+            await playBlobFallback(response);
           }
 
-          const audio = new Audio(audioUrl);
-
-          ttsAudioRef.current = audio;
-
-          ttsAudioUrlRef.current = audioUrl;
-
-          audio.onended = () => {
-            URL.revokeObjectURL(audioUrl);
-
-            ttsAudioUrlRef.current = null;
-
-            onSentenceDone();
-          };
-
-          audio.onerror = () => {
-            URL.revokeObjectURL(audioUrl);
-
-            ttsAudioUrlRef.current = null;
-
-            if (voiceSessionActiveRef.current) {
-              speakWithBrowserFallback();
-            }
-          };
-
-          await audio.play();
-
-          void startBargeInMonitor();
+          // NOTE: Automatic barge-in monitoring is intentionally
+          // disabled here. Without headphones, the mic picks up the
+          // TTS audio itself, and even volume-only detection was
+          // mistaking that for the user speaking — causing the
+          // assistant to interrupt its own playback. Users can still
+          // interrupt manually via the Stop button (handleStopTts).
         } catch (error) {
           if (
             controller.signal.aborted ||
@@ -705,8 +927,8 @@ export function SpeechToSpeechMode({
     },
     [
       goToIdle,
-      startBargeInMonitor,
       stopBargeInMonitor,
+      stopWsRecognition,
     ],
   );
 
@@ -729,10 +951,24 @@ export function SpeechToSpeechMode({
 
       ttsBufferRef.current += chunk;
 
-      const match =
+      let match =
         ttsBufferRef.current.match(
           /^(.*?[.!?\u3002\uff01\uff1f])\s/,
         );
+
+      // If no full sentence yet but the buffer is
+      // already long, break at a comma instead —
+      // gets audio starting sooner on long sentences
+      // without fragmenting short, quick replies.
+      if (
+        !match &&
+        ttsBufferRef.current.length >= 60
+      ) {
+        match =
+          ttsBufferRef.current.match(
+            /^(.*?[,\uff0c])\s/,
+          );
+      }
 
       if (match) {
         const sentence = match[1].trim();
@@ -859,11 +1095,12 @@ export function SpeechToSpeechMode({
         ).length >=
         MEANINGFUL_SPEECH_MIN_CHARS;
 
-      if (
-        meaningfulSpeech &&
-        speechStateRef.current === 'speaking'
-      ) {
-        interruptSpeaking();
+      if (meaningfulSpeech) {
+        if (speechStateRef.current === 'speaking') {
+          interruptSpeaking();
+        } else if (speechStateRef.current === 'thinking') {
+          interruptThinkingRef.current();
+        }
       }
     };
 
@@ -939,41 +1176,8 @@ export function SpeechToSpeechMode({
   }, [interruptSpeaking]);
 
   // ───────────────────────────────────────────────────────────────────────────
-  // Stop Web Speech recognition
+  // (stopWsRecognition moved above, near goToIdle)
   // ───────────────────────────────────────────────────────────────────────────
-
-  const stopWsRecognition = useCallback(() => {
-    wsActiveRef.current = false;
-
-    wsStartingRef.current = false;
-
-    if (wsRestartTimerRef.current !== null) {
-      window.clearTimeout(
-        wsRestartTimerRef.current,
-      );
-
-      wsRestartTimerRef.current = null;
-    }
-
-    const recognition =
-      wsRecognitionRef.current;
-
-    if (recognition) {
-      recognition.onresult = null;
-
-      recognition.onerror = null;
-
-      recognition.onend = null;
-
-      try {
-        recognition.abort();
-      } catch {
-        // Ignore browser-specific abort errors.
-      }
-    }
-
-    wsRecognitionRef.current = null;
-  }, []);
 
   // ───────────────────────────────────────────────────────────────────────────
   // Stop recording
@@ -1156,6 +1360,14 @@ export function SpeechToSpeechMode({
       const currentTurn =
         turnIdRef.current;
 
+      interruptionRef.current = false;
+
+      // Allow interrupting while the assistant is "thinking"
+      // (STT + LLM in flight, no TTS audio playing yet) — safe
+      // to listen here since there's nothing being played back
+      // that could echo into the mic.
+      startWsRecognition();
+
       // ────────────────────────────────────────
       // Final STT
       // ────────────────────────────────────────
@@ -1225,6 +1437,8 @@ export function SpeechToSpeechMode({
         );
 
         processingRef.current = false;
+
+        stopWsRecognition();
 
         void startListeningRef.current();
 
@@ -1345,6 +1559,8 @@ export function SpeechToSpeechMode({
           !ttsSpeakingRef.current &&
           ttsQueueRef.current.length === 0
         ) {
+          stopWsRecognition();
+
           void startListeningRef.current();
         }
 
@@ -1392,6 +1608,7 @@ export function SpeechToSpeechMode({
       handleStreamChunk,
       showError,
       speakSentence,
+      startWsRecognition,
       stopWsRecognition,
     ],
   );
