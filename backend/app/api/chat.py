@@ -178,7 +178,6 @@ async def chat(req: ChatRequest):
 
     # Convert context into LLM-readable format
     context_message = build_context_message(context)
-
     try:
 
         # Call LLM provider
@@ -330,7 +329,6 @@ async def _stream_chat_generator(message: str, session_id: str):
 
     messages = await _build_messages(message, history, context_message)
     current_turn = [messages[-1]]
-
     try:
         # Phase 1: tool calling (non-streaming) — typically 0-2 rounds
         reply_text = await _run_tool_loop(messages, current_turn)

@@ -6,7 +6,7 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Copy, Check, User, Volume2, Square, Share2, Pin } from 'lucide-react';
 import { cn, formatTimestamp } from '../../lib/utils';
-import logo from '../../assets/netkathir-logo.png';
+import logo from '../../assets/chatlogo.png';
 
 export type TtsState = 'idle' | 'playing' | 'paused';
 
@@ -22,6 +22,7 @@ interface MessageBubbleProps {
   onContextMenu?: (e: React.MouseEvent, msg: Message) => void;
   isSelected?: boolean;
   searchQuery?: string;
+  isPending?: boolean;
 }
 
 export const MessageBubble = memo(function MessageBubble({
@@ -36,9 +37,11 @@ export const MessageBubble = memo(function MessageBubble({
   onContextMenu,
   isSelected = false,
   searchQuery = '',
+  isPending = false,
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
+  const hasContent = message.content.trim().length > 0;
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(message.content);
@@ -165,22 +168,28 @@ export const MessageBubble = memo(function MessageBubble({
           )}
           {/* Header */}
           <div className="flex items-center gap-2 mb-2">
-            <div className={cn("w-6 h-6 rounded-lg flex items-center justify-center overflow-hidden", isDarkMode ? "bg-[#2f2f2f] border border-[#424242]" : "bg-green-50 border border-green-200")}>
-              <img src={logo} alt="" className="w-full h-full object-contain p-0.5" />
-            </div>
-            <span className={cn("text-[10px] font-semibold tracking-wider uppercase", isDarkMode ? "text-green-400/70" : "text-green-600")}>NetKathir</span>
+            <img src={logo} alt="" draggable={false} className="h-6 w-auto object-contain" />
+            <span className={cn("text-[10px] font-semibold tracking-wider uppercase", isDarkMode ? "text-green-400/70" : "text-green-600")}>Netiva</span>
             <span className={cn("text-[10px] font-medium tracking-wider uppercase", isDarkMode ? "text-white/25" : "text-midnight-300")}>{formatTimestamp(message.timestamp)}</span>
           </div>
 
           {/* Bubble */}
           <div className={cn("rounded-2xl rounded-tl-md px-6 py-5 transition-all duration-300", isSelected && "ring-2 ring-green-400/50", isDarkMode ? "bg-[#2f2f2f] border border-[#424242]" : "bg-white border border-green-100 shadow-card")}>
             <div className={cn("prose-custom cursor-default select-text", isDarkMode ? "text-white/80" : "text-midnight-800")}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={md}>{message.content}</ReactMarkdown>
+              {hasContent ? (
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={md}>{message.content}</ReactMarkdown>
+              ) : isPending ? (
+                <div className="flex items-center gap-1.5 py-1" aria-label="Netiva is thinking">
+                  <span className="typing-dot" />
+                  <span className="typing-dot" />
+                  <span className="typing-dot" />
+                </div>
+              ) : null}
             </div>
           </div>
 
-          {/* Always-visible action bar */}
-          <div className="flex items-center gap-1 mt-1.5">
+          {/* Keep actions off placeholder messages while a response is starting. */}
+          {hasContent && <div className="flex items-center gap-1 mt-1.5">
             <button onClick={handleCopy} className={copied ? actionBtnActive : actionBtn} aria-label="Copy message">
               {copied ? <Check className="w-[15px] h-[15px]" /> : <Copy className="w-[15px] h-[15px]" />}
             </button>
@@ -223,7 +232,7 @@ export const MessageBubble = memo(function MessageBubble({
                 <Share2 className="w-[15px] h-[15px]" />
               </button>
             )}
-          </div>
+          </div>}
         </div>
       )}
     </div>

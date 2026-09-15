@@ -1,15 +1,54 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Mic, MicOff, ArrowUp, AudioWaveform } from 'lucide-react';
 import { cn } from '../../lib/utils';
+
+// ── Web Speech API (SpeechRecognition) types ──
+// The TypeScript DOM lib used here does not ship SpeechRecognition typings, so
+// we declare the small subset we need (mirrors SpeechToSpeechMode's approach).
+type WSResult = {
+  isFinal: boolean;
+  0: { transcript: string };
+};
+
+type WSEvent = Event & {
+  resultIndex: number;
+  results: ArrayLike<WSResult>;
+};
+
+type WSErrorEvent = Event & {
+  error: string;
+};
+
+interface WSRecognition {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  maxAlternatives?: number;
+  onerror: ((event: WSErrorEvent) => void) | null;
+  onresult: ((event: WSEvent) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+}
+
+type WSWindow = Window & {
+  SpeechRecognition?: new () => WSRecognition;
+  webkitSpeechRecognition?: new () => WSRecognition;
+};
+
+function getSpeechRecognition(): WSRecognition | null {
+  const w = window as WSWindow;
+  const Ctor = w.SpeechRecognition || w.webkitSpeechRecognition;
+  return Ctor ? new Ctor() : null;
+}
 
 interface ChatInputProps {
   onSend: (message: string) => void;
   disabled?: boolean;
   isCentered?: boolean;
   isDarkMode?: boolean;
-  onVoiceToggle?: () => void;
   onSpeechToSpeechToggle?: () => void;
-  isRecording?: boolean;
   replyToMessage?: string | null;
   onClearReply?: () => void;
 }
@@ -19,15 +58,22 @@ export function ChatInput({
   disabled = false,
   isCentered = false,
   isDarkMode = false,
-  onVoiceToggle,
   onSpeechToSpeechToggle,
-  isRecording = false,
   replyToMessage = null,
   onClearReply,
 }: ChatInputProps) {
   const [message, setMessage] = useState('');
   const [isFocused, setIsFocused] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // ── Microphone live-dictation refs ──
+  const recognitionRef = useRef<WSRecognition | null>(null);
+  const baseInputRef = useRef('');          // text already in the box when mic was clicked
+  const finalTranscriptRef = useRef('');    // recognized text the browser marked final
+  const interimTranscriptRef = useRef('');  // recognized text still being refined
+  const stopWasManualRef = useRef(false);   // user clicked the mic button to stop
+  const sentRef = useRef(false);            // exactly-one auto-send guard per dictation
 
   const handleSend = () => {
     const textToSend = message.trim();
@@ -58,6 +104,156 @@ export function ChatInput({
     }
   };
 
+  // ── Microphone: live dictation + auto-send on stop ──
+  const buildLiveText = (base: string, finalText: string, interimText: string) =>
+    [base, finalText, interimText]
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .join(' ');
+
+  const finalizeAndSend = () => {
+    if (sentRef.current) return; // never auto-send twice for one dictation
+    sentRef.current = true;
+    stopWasManualRef.current = false;
+    setIsListening(false);
+    recognitionRef.current = null;
+
+    const transcript = buildLiveText(baseInputRef.current, finalTranscriptRef.current, '');
+    if (!transcript) {
+      // No speech recognized → do NOT send, keep the input (incl. typed text).
+      setMessage(baseInputRef.current);
+      console.info('[Dictation] No speech recognized — nothing was sent.');
+      return;
+    }
+
+    // Put the final transcript into the input, then send it exactly once
+    // through the existing message submission flow (the same Send handler).
+    setMessage(transcript);
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+    if (!disabled) {
+      onSend(transcript);
+      setMessage('');
+    }
+  };
+
+  const stopDictation = () => {
+    stopWasManualRef.current = true;
+    const recognition = recognitionRef.current;
+    if (!recognition) {
+      setIsListening(false);
+      return;
+    }
+    try {
+      recognition.stop();
+    } catch {
+      /* ignore */
+    }
+    // Safety net: if a browser never fires onend after stop(), finalize once.
+    window.setTimeout(() => {
+      if (stopWasManualRef.current && !sentRef.current) {
+        finalizeAndSend();
+      }
+    }, 250);
+  };
+
+  const startDictation = () => {
+    if (disabled) return;
+    const recognition = getSpeechRecognition();
+    if (!recognition) {
+      console.warn('[Dictation] Web Speech API is not supported in this browser.');
+      return;
+    }
+
+    // Preserve any text the user already typed — never wipe it unexpectedly.
+    baseInputRef.current = message.trim();
+    finalTranscriptRef.current = '';
+    interimTranscriptRef.current = '';
+    stopWasManualRef.current = false;
+    sentRef.current = false;
+
+    recognition.lang = 'en-US';
+    recognition.interimResults = true;
+    recognition.continuous = true;
+    recognition.maxAlternatives = 1;
+
+    recognition.onresult = (event) => {
+      let finalText = '';
+      let interimText = '';
+      for (let i = 0; i < event.results.length; i += 1) {
+        const result = event.results[i];
+        const word = result[0]?.transcript ?? '';
+        if (result.isFinal) finalText += word;
+        else interimText += word;
+      }
+      // Live update of the input box while the user speaks.
+      // Interim results are never sent to the backend at this stage.
+      finalTranscriptRef.current = finalText;
+      interimTranscriptRef.current = interimText;
+      setMessage(buildLiveText(baseInputRef.current, finalText, interimText));
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+        textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
+      }
+    };
+
+    recognition.onerror = (event) => {
+      console.warn('[Dictation] Speech recognition error:', event.error);
+      // Permission denied / service denied → stop, restore mic, never auto-send.
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        stopWasManualRef.current = false;
+        try {
+          recognition.abort();
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+      if (stopWasManualRef.current && !sentRef.current) {
+        // User clicked the mic to stop → finalize the transcript and auto-send.
+        finalizeAndSend();
+      } else if (!sentRef.current) {
+        // Recognition ended on its own (error / timeout / no-speech) → no auto-send.
+        setMessage(buildLiveText(baseInputRef.current, finalTranscriptRef.current, interimTranscriptRef.current));
+      }
+    };
+
+    recognitionRef.current = recognition;
+    try {
+      recognition.start();
+      setIsListening(true);
+    } catch (err) {
+      console.warn('[Dictation] Could not start recognition:', err);
+      setIsListening(false);
+      recognitionRef.current = null;
+      setMessage(baseInputRef.current);
+    }
+  };
+
+  const handleMicClick = () => {
+    if (disabled) return;
+    if (isListening) stopDictation();
+    else startDictation();
+  };
+
+  // Clean up recognition when the component unmounts mid-dictation.
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+  }, []);
+
   const hasContent = message.trim().length > 0;
 
   const inputBg = isDarkMode ? 'bg-[#2f2f2f]' : 'bg-white';
@@ -67,7 +263,7 @@ export function ChatInput({
     ? 'placeholder:text-white/30'
     : 'placeholder:text-midnight-300';
 
-  const voiceButtonStyle = isRecording
+  const voiceButtonStyle = isListening
     ? 'bg-red-500/20 text-red-400 shadow-[0_0_12px_rgba(239,68,68,0.25)] animate-pulse'
     : isDarkMode
       ? 'text-white/40 hover:text-green-400 hover:bg-green-500/10'
@@ -89,7 +285,7 @@ export function ChatInput({
         <div
           className={cn(
             'relative rounded-2xl border transition-all duration-300',
-            isFocused || isRecording
+            isFocused || isListening
               ? `${inputBg} ${isDarkMode ? 'border-[#424242]' : 'border-green-400/50'}`
               : `${inputBg} ${isDarkMode ? 'border-[#424242]' : 'border-green-200/60'}`
           )}
@@ -104,7 +300,7 @@ export function ChatInput({
               )}
             </div>
           )}
-          {isRecording && (
+          {isListening && (
             <div
               className={cn(
                 'absolute -top-9 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-1.5 rounded-full animate-slide-down',
@@ -118,7 +314,7 @@ export function ChatInput({
                 Listening...
               </span>
               <button
-                onClick={onVoiceToggle}
+                onClick={handleMicClick}
                 className="text-green-500/60 hover:text-green-500 ml-1 transition-colors"
                 aria-label="Stop recording"
               >
@@ -134,7 +330,7 @@ export function ChatInput({
             onKeyDown={handleKeyDown}
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
-            placeholder={isRecording ? 'Listening...' : 'Ask me anything...'}
+            placeholder={isListening ? 'Listening...' : 'Ask me anything...'}
             disabled={disabled}
             rows={1}
             className={cn(
@@ -146,16 +342,16 @@ export function ChatInput({
 
           <div className="absolute right-2 sm:right-3 bottom-2 sm:bottom-3 flex items-center gap-1 sm:gap-1.5">
             <button
-              onClick={onVoiceToggle}
+              onClick={handleMicClick}
               disabled={disabled}
-              aria-label={isRecording ? 'Stop recording' : 'Start voice input'}
+              aria-label={isListening ? 'Stop recording' : 'Start voice input'}
               className={cn(
                 'p-2 sm:p-2.5 rounded-xl transition-all duration-300 active:scale-90',
                 voiceButtonStyle,
                 disabled && 'opacity-40 cursor-not-allowed'
               )}
             >
-              {isRecording ? (
+              {isListening ? (
                 <MicOff className="w-4 h-4" />
               ) : (
                 <Mic className="w-4 h-4" />
@@ -238,7 +434,7 @@ export function ChatInput({
         <div
           className={cn(
             'flex items-center gap-1 rounded-2xl border transition-all duration-300 pr-1',
-            isFocused || isRecording
+            isFocused || isListening
               ? `${inputBg} ${isDarkMode ? 'border-[#424242]' : 'border-green-400/50'}`
               : `${inputBg} ${isDarkMode ? 'border-[#424242]' : 'border-green-200/60'}`
           )}
@@ -251,7 +447,7 @@ export function ChatInput({
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
             placeholder={
-              isRecording ? 'Listening...' : 'Type your message...'
+              isListening ? 'Listening...' : 'Type your message...'
             }
             disabled={disabled}
             rows={1}
@@ -263,10 +459,10 @@ export function ChatInput({
           />
 
           <button
-            onClick={onVoiceToggle}
+            onClick={handleMicClick}
             disabled={disabled}
             aria-label={
-              isRecording ? 'Stop recording' : 'Start voice input'
+              isListening ? 'Stop recording' : 'Start voice input'
             }
             className={cn(
               'p-2 sm:p-2.5 rounded-xl transition-all duration-300 active:scale-90',
@@ -274,7 +470,7 @@ export function ChatInput({
               disabled && 'opacity-40 cursor-not-allowed'
             )}
           >
-            {isRecording ? (
+            {isListening ? (
               <MicOff className="w-4 h-4" />
             ) : (
               <Mic className="w-4 h-4" />

@@ -78,6 +78,35 @@ export const useChatStore = create<ChatStore>()(
               : t
           ),
         }));
+        return newMessage.id;
+      },
+
+      updateMessage: (threadId: string, messageId: string, content: string) => {
+        set((state) => ({
+          threads: state.threads.map((t) =>
+            t.id === threadId
+              ? {
+                  ...t,
+                  messages: t.messages.map((m) => m.id === messageId ? { ...m, content } : m),
+                  updatedAt: Date.now(),
+                }
+              : t
+          ),
+        }));
+      },
+
+      removeMessage: (threadId: string, messageId: string) => {
+        set((state) => ({
+          threads: state.threads.map((t) =>
+            t.id === threadId
+              ? {
+                  ...t,
+                  messages: t.messages.filter((message) => message.id !== messageId),
+                  updatedAt: Date.now(),
+                }
+              : t
+          ),
+        }));
       },
 
       setThreadSessionId: (threadId: string, sessionId: string) => {

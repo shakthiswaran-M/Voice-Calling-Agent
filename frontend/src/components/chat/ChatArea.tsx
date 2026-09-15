@@ -10,8 +10,7 @@ import { ContextMenu, Copy, Reply, Pin, Forward } from './ContextMenu';
 import { useAutoScroll } from '../../hooks/useAutoScroll';
 import { ArrowDown, Menu, Search, Printer, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn, TIMELINE_GAP_MS } from '../../lib/utils';
-import { webmBlobToWav } from '../../lib/audioWav';
-import { sendChatMessage, transcribeAudio, synthesizeSpeech, ApiError } from '../../lib/api';
+import { sendChatMessageStream, synthesizeSpeech, ApiError } from '../../lib/api';
 import { cancelBrowserTts, speakWithBrowserTts } from '../../lib/browserTts';
 import { ShareModal } from './ShareModal';
 import logo from '../../assets/netkathir-logo.png';
@@ -25,7 +24,7 @@ export function ChatArea() {
     threads, activeThreadId, addMessage, createThread, updateThreadTitle,
     setThreadSessionId, toggleSidebar, isDarkMode, saveScrollPosition,
     scrollPositions, markThreadRead, incrementUnread, togglePinMessage,
-    setReplyTo, 
+    setReplyTo, removeMessage,
   } = useChatStore();
   const activeThread = threads.find((t) => t.id === activeThreadId);
   const messages = activeThread?.messages || [];
@@ -66,7 +65,7 @@ export function ChatArea() {
 
   // ── TTS ──
   const [isSending, setIsSending] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
+  const [pendingAssistantMessageId, setPendingAssistantMessageId] = useState<string | null>(null);
   const [speechToSpeechOpen, setSpeechToSpeechOpen] = useState(false);
   const [ttsMsgId, setTtsMsgId] = useState<string | null>(null);
   const [ttsState, setTtsState] = useState<TtsState>('idle');
@@ -74,8 +73,6 @@ export function ChatArea() {
   const audioUrlRef = useRef<string | null>(null);
   const ttsRequestIdRef = useRef(0);
   const ttsAbortControllerRef = useRef<AbortController | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
 
   const stopTts = useCallback(() => {
     ttsRequestIdRef.current += 1;
@@ -270,51 +267,40 @@ export function ChatArea() {
     scrollToBottomOnSend();
     setReplyTo(threadId, null);
     setIsSending(true);
+    let botMessageId: string | null = null;
+    let streamedReply = '';
     try {
-      const { reply, session_id } = await sendChatMessage(content, thread?.sessionId);
-      if (!thread?.sessionId) setThreadSessionId(threadId, session_id);
-      addMessage(threadId, { role: 'bot', content: reply || "(no response)" });
+      const placeholderId = addMessage(threadId, { role: 'bot', content: '' });
+      botMessageId = placeholderId;
+      setPendingAssistantMessageId(placeholderId);
+      const session_id = await sendChatMessageStream(
+        content,
+        (chunk) => {
+          streamedReply += chunk;
+          useChatStore.getState().updateMessage(threadId, placeholderId, streamedReply);
+        },
+        thread?.sessionId,
+      );
+      if (!streamedReply) useChatStore.getState().updateMessage(threadId, botMessageId, '(no response)');
+      if (!thread?.sessionId && session_id) setThreadSessionId(threadId, session_id);
     } catch (err) {
       const message = err instanceof ApiError ? err.message : FALLBACK_ERROR_RESPONSE;
-      addMessage(threadId, { role: 'bot', content: message });
-    } finally { setIsSending(false); }
-  };
-
-
-  const handleStartConversation = async () => {
-    if (isRecording) { mediaRecorderRef.current?.stop(); setIsRecording(false); return; }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      audioChunksRef.current = [];
-      recorder.ondataavailable = (e) => audioChunksRef.current.push(e.data);
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((track) => track.stop());
-        const webmBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const threadId = activeThreadId || createThread().id;
-        setIsSending(true);
-        try {
-          // Convert WebM → 16-bit PCM WAV before upload (see lib/audioWav.ts).
-          const audioBlob = await webmBlobToWav(webmBlob);
-          const transcript = await transcribeAudio(audioBlob);
-          if (!transcript || !transcript.trim()) {
-            addMessage(threadId, { role: 'bot', content: "Sorry, I didn't catch that." }); return;
-          }
-          addMessage(threadId, { role: 'user', content: transcript });
-          const thread = useChatStore.getState().threads.find((t) => t.id === threadId);
-          const { reply, session_id } = await sendChatMessage(transcript, thread?.sessionId);
-          if (!thread?.sessionId) setThreadSessionId(threadId, session_id);
-          addMessage(threadId, { role: 'bot', content: reply || '(no response)' });
-          playTts(threadId, reply || '(no response)');
-        } catch (err) {
-          const message = err instanceof ApiError ? err.message : FALLBACK_ERROR_RESPONSE;
+      if (botMessageId) {
+        if (streamedReply.trim()) {
+          useChatStore.getState().updateMessage(threadId, botMessageId, `${streamedReply}\n\n${message}`);
+        } else {
+          removeMessage(threadId, botMessageId);
           addMessage(threadId, { role: 'bot', content: message });
-        } finally { setIsSending(false); }
-      };
-      mediaRecorderRef.current = recorder;
-      recorder.start(); setIsRecording(true);
-    } catch (err) { console.error('Microphone access denied or unavailable:', err); }
+        }
+      } else {
+        addMessage(threadId, { role: 'bot', content: message });
+      }
+    } finally {
+      setPendingAssistantMessageId(null);
+      setIsSending(false);
+    }
   };
+
 
   useEffect(() => {
     if (!activeThreadId && threads.length === 0) createThread();
@@ -495,7 +481,7 @@ export function ChatArea() {
                 >
                   <Pin className={cn('w-3 h-3 shrink-0 self-center', isDarkMode ? 'text-green-400/80' : 'text-green-600')} />
                   <span className={cn('text-[11px] font-semibold uppercase tracking-wide shrink-0', isDarkMode ? 'text-green-400/80' : 'text-green-600')}>
-                    {latestPinned.role === 'user' ? 'You' : 'NetKathir'}
+                    {latestPinned.role === 'user' ? 'You' : 'Netkathir'}
                   </span>
                   <span className={cn('text-xs truncate', isDarkMode ? 'text-white/70 group-hover:text-white/90' : 'text-midnight-700 group-hover:text-midnight-900')}>
                     {latestPinned.content}
@@ -527,7 +513,7 @@ export function ChatArea() {
                     >
                       <Pin className={cn('w-3 h-3 shrink-0 self-center', pm.id === latestPinned.id ? (isDarkMode ? 'text-green-400 fill-green-400/40' : 'text-green-600 fill-green-500/30') : (isDarkMode ? 'text-white/25' : 'text-gray-300'))} />
                       <span className={cn('text-[10px] font-semibold uppercase tracking-wide shrink-0', pm.id === latestPinned.id ? (isDarkMode ? 'text-green-400' : 'text-green-600') : (isDarkMode ? 'text-white/40' : 'text-gray-400'))}>
-                        {pm.role === 'user' ? 'You' : 'NetKathir'}
+                        {pm.role === 'user' ? 'You' : 'Netkathir'}
                       </span>
                       <span className={cn('text-xs truncate', pm.id === latestPinned.id ? (isDarkMode ? 'text-white/85' : 'text-midnight-900') : (isDarkMode ? 'text-white/60' : 'text-midnight-600'))}>
                         {pm.content}
@@ -571,6 +557,7 @@ export function ChatArea() {
                       message={msg}
                       index={i}
                       isDarkMode={isDarkMode}
+                      isPending={msg.id === pendingAssistantMessageId}
                       ttsState={msgTtsState}
                       onTtsPlay={isBotMsg ? playTts : undefined}
                       onTtsPause={isBotMsg && msgTtsState === 'playing' ? pauseTts : undefined}
@@ -583,23 +570,6 @@ export function ChatArea() {
                   </div>
                 );
               })}
-              {isSending && (
-                <div className="w-full msg-slide-left">
-                  <div className="max-w-[85%] md:max-w-[72%]">
-                    <div className={cn('flex items-center gap-2 mb-2')}>
-                      <div className={cn('w-5 h-5 sm:w-6 sm:h-6 rounded-md flex items-center justify-center overflow-hidden', isDarkMode ? 'bg-green-500/10 border border-green-500/20' : 'bg-green-50 border border-green-200')}>
-                        <img src={logo} alt="" className="w-full h-full object-contain p-0.5" />
-                      </div>
-                      <span className={cn('text-[10px] font-semibold tracking-wider uppercase', isDarkMode ? 'text-green-400/70' : 'text-green-600')}>netKathir</span>
-                    </div>
-                    <div className={cn('rounded-2xl rounded-tl-md px-5 py-4 flex items-center gap-2', isDarkMode ? 'bg-green-500/5 border border-green-500/10' : 'bg-white border border-green-100 shadow-card')}>
-                      <span className="typing-dot" />
-                      <span className="typing-dot" />
-                      <span className="typing-dot" />
-                    </div>
-                  </div>
-                </div>
-              )}
               {isScrolledUp && (
                 <div className="flex justify-center sticky bottom-4 z-10 animate-fade-in-up">
                   <button onClick={() => { setRestorationTarget(null); scrollToBottom(true); }} className={cn('flex items-center gap-2 px-4 py-2 backdrop-blur-sm text-white rounded-full shadow-lg transition-all duration-300 active:scale-95 hover:shadow-xl', isDarkMode ? 'bg-green-500/90 shadow-[0_4px_20px_rgba(34,197,94,0.3)]' : 'bg-green-600 shadow-[0_4px_20px_rgba(22,163,74,0.25)]')}>
@@ -617,9 +587,7 @@ export function ChatArea() {
               onSend={handleSendMessage}
               disabled={!activeThreadId || isSending}
               isDarkMode={isDarkMode}
-              onVoiceToggle={handleStartConversation}
               onSpeechToSpeechToggle={() => setSpeechToSpeechOpen(true)}
-              isRecording={isRecording}
               replyToMessage={replyToMessage?.content || null}
               onClearReply={activeThreadId ? () => setReplyTo(activeThreadId, null) : undefined}
             />
@@ -642,7 +610,7 @@ export function ChatArea() {
             <Menu className="w-5 h-5" />
           </button>
           <div className="flex-1 flex flex-col items-center justify-center px-6 min-h-0 safe-area-top">
-            <img src={logo} alt="netKathir" className="w-56 h-56 sm:w-72 sm:h-72 md:w-80 md:h-80 object-contain mb-6 sm:mb-8 drop-shadow-lg message-slide-in" />
+            <img src={logo} alt="Netkathir" className="w-56 h-56 sm:w-72 sm:h-72 md:w-80 md:h-80 object-contain mb-6 sm:mb-8 drop-shadow-lg" />
             <h1 className={cn('font-display text-xl sm:text-2xl md:text-3xl font-bold text-center mb-2 message-slide-in', isDarkMode ? 'text-[#ececec]' : 'text-midnight-900')} style={{ animationDelay: '0.1s' }}>
               How can I help you today?
             </h1>
@@ -651,14 +619,14 @@ export function ChatArea() {
             </p>
           </div>
           <div className="shrink-0 safe-area-bottom">
-            <ChatInput onSend={handleSendMessage} disabled={!activeThreadId || isSending} isCentered isDarkMode={isDarkMode} onVoiceToggle={handleStartConversation} onSpeechToSpeechToggle={() => setSpeechToSpeechOpen(true)} isRecording={isRecording} />
+            <ChatInput onSend={handleSendMessage} disabled={!activeThreadId || isSending} isCentered isDarkMode={isDarkMode} onSpeechToSpeechToggle={() => setSpeechToSpeechOpen(true)} />
           </div>
         </div>
       )}
 
       <SpeechToSpeechMode
         isOpen={speechToSpeechOpen}
-        disabled={!activeThreadId || isSending || isRecording}
+        disabled={!activeThreadId || isSending}
         isDarkMode={isDarkMode}
         onClose={() => setSpeechToSpeechOpen(false)}
       />

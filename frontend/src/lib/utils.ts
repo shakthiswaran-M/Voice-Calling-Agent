@@ -7,6 +7,14 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/** Normalize common speech-recognition variants of the product name. */
+export function normalizeNetkathir(text: string): string {
+  return text.replace(
+    /\bnet\s*(?:kathir|kadhir|kadir|cathir)|netkathir|netkadhir|netkadir|netcathir\b/gi,
+    'Netkathir',
+  );
+}
+
 /**
  * Relative timestamp used across the chat UI ("Just now", "5m ago", ...).
  * Lives here (not in the store) so UI components share one implementation.
@@ -47,8 +55,8 @@ export async function copyTextToClipboard(text: string): Promise<void> {
 }
 
 /** Public share URL for a thread (used by the share modal in both nav + chat). */
-export function getThreadShareUrl(sessionId: string): string {
-  return `${window.location.origin}/share/${encodeURIComponent(sessionId)}`;
+export function getThreadShareUrl(threadId: string): string {
+  return `${window.location.origin}/share/${threadId}`;
 }
 
 /**
