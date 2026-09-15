@@ -10,7 +10,6 @@ import {
 } from '../../lib/api';
 import { useChatStore } from '../../store/useChatStore';
 import { normalizeNetkathir } from '../../lib/utils';
-const [isTtsSpeaking, setIsTtsSpeaking] = useState(false);
 
 /**
  * Speech-to-Speech state machine
@@ -182,6 +181,8 @@ export function SpeechToSpeechMode({
 
   const [isResponseAtBottom, setIsResponseAtBottom] = useState(true);
 
+  const [isTtsSpeaking, setIsTtsSpeaking] = useState(false);
+
   // ───────────────────────────────────────────────────────────────────────────
   // Media / audio refs
   // ───────────────────────────────────────────────────────────────────────────
@@ -330,6 +331,8 @@ export function SpeechToSpeechMode({
 
     ttsSpeakingRef.current = false;
 
+    setIsTtsSpeaking(false);
+
     ttsQueueRef.current = [];
 
     isResponseAtBottomRef.current = true;
@@ -345,6 +348,8 @@ export function SpeechToSpeechMode({
     processingRef.current = false;
 
     ttsSpeakingRef.current = false;
+
+    setIsTtsSpeaking(false);
 
     ttsQueueRef.current = [];
 
@@ -418,6 +423,8 @@ export function SpeechToSpeechMode({
     }
 
     ttsSpeakingRef.current = false;
+
+    setIsTtsSpeaking(false);
 
     ttsQueueRef.current = [];
 
@@ -1085,6 +1092,8 @@ export function SpeechToSpeechMode({
     }
 
     ttsSpeakingRef.current = false;
+
+    setIsTtsSpeaking(false);
 
     ttsQueueRef.current = [];
 
@@ -2107,7 +2116,7 @@ export function SpeechToSpeechMode({
         )}
 
         {/* Stop TTS button */}
-        {ttsSpeakingRef.current && (
+        {isTtsSpeaking && (
           <button
             type="button"
             onClick={handleStopTts}
