@@ -9,9 +9,8 @@ import { MessageSearch } from './MessageSearch';
 import { ContextMenu, Copy, Reply, Pin, Forward } from './ContextMenu';
 import { useAutoScroll } from '../../hooks/useAutoScroll';
 import { ArrowDown, Menu, Search, Printer, ChevronDown, ChevronUp } from 'lucide-react';
-import { cn, normalizeNetkathir, TIMELINE_GAP_MS } from '../../lib/utils';
-import { webmBlobToWav } from '../../lib/audioWav';
-import { sendChatMessage, sendChatMessageStream, transcribeAudio, synthesizeSpeech, ApiError } from '../../lib/api';
+import { cn, TIMELINE_GAP_MS } from '../../lib/utils';
+import { sendChatMessageStream, synthesizeSpeech, ApiError } from '../../lib/api';
 import { cancelBrowserTts, speakWithBrowserTts } from '../../lib/browserTts';
 import { ShareModal } from './ShareModal';
 import logo from '../../assets/netkathir-logo.png';
@@ -67,7 +66,6 @@ export function ChatArea() {
   // ── TTS ──
   const [isSending, setIsSending] = useState(false);
   const [pendingAssistantMessageId, setPendingAssistantMessageId] = useState<string | null>(null);
-  const [isRecording, setIsRecording] = useState(false);
   const [speechToSpeechOpen, setSpeechToSpeechOpen] = useState(false);
   const [ttsMsgId, setTtsMsgId] = useState<string | null>(null);
   const [ttsState, setTtsState] = useState<TtsState>('idle');
@@ -75,8 +73,6 @@ export function ChatArea() {
   const audioUrlRef = useRef<string | null>(null);
   const ttsRequestIdRef = useRef(0);
   const ttsAbortControllerRef = useRef<AbortController | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
 
   const stopTts = useCallback(() => {
     ttsRequestIdRef.current += 1;
@@ -305,41 +301,6 @@ export function ChatArea() {
     }
   };
 
-
-  const handleStartConversation = async () => {
-    if (isRecording) { mediaRecorderRef.current?.stop(); setIsRecording(false); return; }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      audioChunksRef.current = [];
-      recorder.ondataavailable = (e) => audioChunksRef.current.push(e.data);
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((track) => track.stop());
-        const webmBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const threadId = activeThreadId || createThread().id;
-        setIsSending(true);
-        try {
-          // Convert WebM → 16-bit PCM WAV before upload (see lib/audioWav.ts).
-          const audioBlob = await webmBlobToWav(webmBlob);
-          const transcript = normalizeNetkathir(await transcribeAudio(audioBlob));
-          if (!transcript || !transcript.trim()) {
-            addMessage(threadId, { role: 'bot', content: "Sorry, I didn't catch that." }); return;
-          }
-          addMessage(threadId, { role: 'user', content: transcript });
-          const thread = useChatStore.getState().threads.find((t) => t.id === threadId);
-          const { reply, session_id } = await sendChatMessage(transcript, thread?.sessionId);
-          if (!thread?.sessionId) setThreadSessionId(threadId, session_id);
-          addMessage(threadId, { role: 'bot', content: reply || '(no response)' });
-          playTts(threadId, reply || '(no response)');
-        } catch (err) {
-          const message = err instanceof ApiError ? err.message : FALLBACK_ERROR_RESPONSE;
-          addMessage(threadId, { role: 'bot', content: message });
-        } finally { setIsSending(false); }
-      };
-      mediaRecorderRef.current = recorder;
-      recorder.start(); setIsRecording(true);
-    } catch (err) { console.error('Microphone access denied or unavailable:', err); }
-  };
 
   useEffect(() => {
     if (!activeThreadId && threads.length === 0) createThread();
@@ -626,9 +587,7 @@ export function ChatArea() {
               onSend={handleSendMessage}
               disabled={!activeThreadId || isSending}
               isDarkMode={isDarkMode}
-              onVoiceToggle={handleStartConversation}
               onSpeechToSpeechToggle={() => setSpeechToSpeechOpen(true)}
-              isRecording={isRecording}
               replyToMessage={replyToMessage?.content || null}
               onClearReply={activeThreadId ? () => setReplyTo(activeThreadId, null) : undefined}
             />
@@ -660,14 +619,14 @@ export function ChatArea() {
             </p>
           </div>
           <div className="shrink-0 safe-area-bottom">
-            <ChatInput onSend={handleSendMessage} disabled={!activeThreadId || isSending} isCentered isDarkMode={isDarkMode} onVoiceToggle={handleStartConversation} onSpeechToSpeechToggle={() => setSpeechToSpeechOpen(true)} isRecording={isRecording} />
+            <ChatInput onSend={handleSendMessage} disabled={!activeThreadId || isSending} isCentered isDarkMode={isDarkMode} onSpeechToSpeechToggle={() => setSpeechToSpeechOpen(true)} />
           </div>
         </div>
       )}
 
       <SpeechToSpeechMode
         isOpen={speechToSpeechOpen}
-        disabled={!activeThreadId || isSending || isRecording}
+        disabled={!activeThreadId || isSending}
         isDarkMode={isDarkMode}
         onClose={() => setSpeechToSpeechOpen(false)}
       />
