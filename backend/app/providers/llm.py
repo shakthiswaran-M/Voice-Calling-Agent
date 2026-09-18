@@ -7,18 +7,129 @@ import re
 from openai import AsyncOpenAI
 
 
-from app.agent.prompts import AGENT_INSTRUCTIONS, SYSTEM_PROMPT
+from app.agent.prompts import (
+    AGENT_INSTRUCTIONS,
+    NETKATHIR_SCOPE_RESTRICTION_RESPONSE,
+    SYSTEM_PROMPT,
+)
 from app.agent.tools import AVAILABLE_TOOLS, TOOL_SCHEMAS
 from app.config import settings
 
 
 logger = logging.getLogger(__name__)
 
+MAX_OUTPUT_TOKENS = 220
 
 client = AsyncOpenAI(
     api_key=settings.llm_api_key,
     base_url=settings.llm_base_url
 )
+
+
+NETKATHIR_EXPLICIT_TERMS = (
+    "netkathir",
+    "garage bill",
+    "hrms",
+)
+
+NETKATHIR_CONTEXT_TERMS = (
+    "services",
+    "service",
+    "product",
+    "products",
+    "project",
+    "projects",
+    "team",
+    "founder",
+    "leadership",
+    "location",
+    "office",
+    "contact",
+    "working hours",
+    "internship",
+    "internships",
+    "career",
+    "careers",
+    "appointment",
+    "appointments",
+    "consultation",
+    "consultations",
+    "website",
+    "technology",
+    "technologies",
+    "platform",
+    "hr",
+)
+
+
+def _normalize_scope_text(value: str) -> str:
+    """Normalize text for safe deterministic scope checks."""
+    return re.sub(r"[^a-z0-9\s]", " ", (value or "").lower())
+
+
+def _history_text(history: list | None) -> str:
+    """Flatten prior chat messages for contextual follow-up detection."""
+    if not history:
+        return ""
+
+    parts: list[str] = []
+    for message in history:
+        if isinstance(message, dict):
+            content = message.get("content") or ""
+        else:
+            content = str(message)
+        if content:
+            parts.append(content)
+    return " ".join(parts)
+
+
+def is_netkathir_related(
+    message: str,
+    history: list | None = None,
+    context_message: str = "",
+) -> bool:
+    """Return True when the request falls within the Netkathir scope."""
+    if not message and not history and not context_message:
+        return False
+
+    message_text = _normalize_scope_text(message)
+    history_text = _normalize_scope_text(_history_text(history))
+    context_text = _normalize_scope_text(context_message)
+
+    if any(term in message_text for term in NETKATHIR_EXPLICIT_TERMS):
+        return True
+    if any(term in history_text for term in NETKATHIR_EXPLICIT_TERMS):
+        return True
+    if any(term in context_text for term in NETKATHIR_EXPLICIT_TERMS):
+        return True
+
+    follow_up_patterns = (
+        r"\b(?:this|that|it|they|them|those|which one|one is|related to|used for|for hr|for this|that one)\b"
+    )
+    if re.search(follow_up_patterns, message_text) and (
+        any(term in history_text for term in NETKATHIR_EXPLICIT_TERMS)
+        or any(term in history_text for term in NETKATHIR_CONTEXT_TERMS)
+        or any(term in context_text for term in NETKATHIR_CONTEXT_TERMS)
+    ):
+        return True
+
+    if re.search(
+        r"\b(?:company|business|organization)\b",
+        message_text,
+    ) and (
+        any(term in history_text for term in NETKATHIR_EXPLICIT_TERMS)
+        or any(term in history_text for term in NETKATHIR_CONTEXT_TERMS)
+        or any(term in context_text for term in NETKATHIR_EXPLICIT_TERMS)
+        or any(term in context_text for term in NETKATHIR_CONTEXT_TERMS)
+    ):
+        return True
+
+    return False
+
+
+def get_scope_restriction_response() -> str:
+    """Return the single source of truth for off-topic responses."""
+    return NETKATHIR_SCOPE_RESTRICTION_RESPONSE
 
 
 def clean_response(text: str) -> str:
@@ -90,6 +201,12 @@ async def generate_response(
 
     reply = ""
 
+    if not is_netkathir_related(message, history=history, context_message=context_message):
+        return get_scope_restriction_response(), [
+            {"role": "user", "content": message},
+            {"role": "assistant", "content": get_scope_restriction_response()},
+        ]
+
     try:
         # Allow up to 3 tool-calling rounds
         for round_number in range(3):
@@ -97,6 +214,8 @@ async def generate_response(
             request = {
                 "model": settings.llm_model,
                 "messages": messages,
+                "max_tokens": MAX_OUTPUT_TOKENS,
+                "temperature": 0.2,
             }
 
             if round_number < 2:

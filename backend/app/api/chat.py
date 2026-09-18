@@ -8,7 +8,15 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.database import database
-from app.providers.llm import generate_response, clean_response, client, TOOL_SCHEMAS, AVAILABLE_TOOLS
+from app.agent.prompts import NETKATHIR_SCOPE_RESTRICTION_RESPONSE
+from app.providers.llm import (
+    AVAILABLE_TOOLS,
+    TOOL_SCHEMAS,
+    clean_response,
+    client,
+    generate_response,
+    is_netkathir_related,
+)
 
 
 router = APIRouter()
@@ -157,6 +165,21 @@ async def chat(req: ChatRequest):
 
     # Convert context into LLM-readable format
     context_message = build_context_message(context)
+
+    if not is_netkathir_related(
+        req.message,
+        history=history,
+        context_message=context_message,
+    ):
+        reply = NETKATHIR_SCOPE_RESTRICTION_RESPONSE
+        current_turn = [
+            {"role": "user", "content": req.message},
+            {"role": "assistant", "content": reply},
+        ]
+        await database.add_messages(session_id, current_turn)
+        await database.save_context(session_id, context)
+        return ChatResponse(reply=reply, session_id=session_id)
+
     try:
 
         # Call LLM provider
@@ -306,6 +329,22 @@ async def _stream_chat_generator(message: str, session_id: str):
     context = update_context(context, message)
     context_message = build_context_message(context)
 
+    if not is_netkathir_related(
+        message,
+        history=history,
+        context_message=context_message,
+    ):
+        reply_text = NETKATHIR_SCOPE_RESTRICTION_RESPONSE
+        current_turn = [
+            {"role": "user", "content": message},
+            {"role": "assistant", "content": reply_text},
+        ]
+        await database.add_messages(session_id, current_turn)
+        await database.save_context(session_id, context)
+        yield f"data: {json.dumps({'type': 'chunk', 'text': reply_text})}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
+        return
+
     messages = await _build_messages(message, history, context_message)
     current_turn = [messages[-1]]
     try:
@@ -321,6 +360,8 @@ async def _stream_chat_generator(message: str, session_id: str):
                 tools=TOOL_SCHEMAS,
                 tool_choice="none",
                 stream=True,
+                max_tokens=220,
+                temperature=0.2,
             )
             reply_text = ""
             async for chunk in completion:
