@@ -386,7 +386,7 @@ async def _stream_chat_generator(message: str, session_id: str):
                 tools=TOOL_SCHEMAS,
                 tool_choice="none",
                 stream=True,
-                max_tokens=220,
+                max_tokens=MAX_OUTPUT_TOKENS,
                 temperature=0.2,
             )
             reply_text = ""

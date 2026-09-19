@@ -18,7 +18,9 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-MAX_OUTPUT_TOKENS = 220
+# Single source of truth for the maximum response length. Keep this large enough
+# for structured Netkathir answers without allowing unnecessarily verbose output.
+MAX_OUTPUT_TOKENS = 1200
 
 client = AsyncOpenAI(
     api_key=settings.llm_api_key,
