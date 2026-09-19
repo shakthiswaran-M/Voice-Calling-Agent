@@ -35,8 +35,10 @@ export type ChatState = {
   threads: Thread[];
   activeThreadId: string | null;
   isSidebarOpen: boolean;
+  isMobileSidebarOpen: boolean;
   editingThreadId: string | null;
   isDarkMode: boolean;
+  isCreatingThread: boolean;
   scrollPositions: Record<string, ScrollPosition>;
 };
 
@@ -45,7 +47,9 @@ export type ChatActions = {
   deleteThread: (threadId: string) => void;
   updateThreadTitle: (threadId: string, title: string) => void;
   togglePinThread: (threadId: string) => void;
-  setActiveThread: (threadId: string) => void;
+  setActiveThread: (threadId: string | null) => void;
+  startNewChat: () => Thread;
+  ensureConsistency: () => void;
   addMessage: (threadId: string, message: Omit<Message, 'id' | 'timestamp'>) => string;
   updateMessage: (threadId: string, messageId: string, content: string) => void;
   removeMessage: (threadId: string, messageId: string) => void;

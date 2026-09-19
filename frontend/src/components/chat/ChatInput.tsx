@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { forwardRef, useImperativeHandle, useRef, useState } from 'react';
 import { Mic, MicOff, ArrowUp, AudioWaveform } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -14,7 +14,11 @@ interface ChatInputProps {
   onClearReply?: () => void;
 }
 
-export function ChatInput({
+export interface ChatInputHandle {
+  focus: () => void;
+}
+
+export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
   onSend,
   disabled = false,
   isCentered = false,
@@ -24,10 +28,25 @@ export function ChatInput({
   isRecording = false,
   replyToMessage = null,
   onClearReply,
-}: ChatInputProps) {
+}: ChatInputProps, ref) => {
   const [message, setMessage] = useState('');
   const [isFocused, setIsFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Exposed to ChatArea for type-to-focus: focusing synchronously inside the
+  // global keydown handler lets the browser deliver the pressed character
+  // straight into this textarea (no character loss, no duplication).
+  useImperativeHandle(ref, () => ({
+    focus: () => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      // Park the caret at the end so the first typed character appends exactly
+      // like it would after a manual click into the input.
+      const end = el.value.length;
+      el.setSelectionRange(end, end);
+    },
+  }), []);
 
   const handleSend = () => {
     const textToSend = message.trim();
@@ -216,7 +235,7 @@ export function ChatInput({
   return (
     <div
       className={cn(
-        'border-t backdrop-blur-md',
+        'border-t',
         isDarkMode
           ? 'border-[#2f2f2f] bg-[#000000]/80'
           : 'border-green-100 bg-white/80'
@@ -339,4 +358,6 @@ export function ChatInput({
       </div>
     </div>
   );
-}
+});
+
+ChatInput.displayName = 'ChatInput';

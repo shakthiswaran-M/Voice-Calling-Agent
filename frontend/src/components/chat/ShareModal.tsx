@@ -46,7 +46,7 @@ export function ShareModal({ threadId, threadTitle, isDarkMode = false, onClose 
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center px-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-fade-in" />
+      <div className="absolute inset-0 bg-black/40 animate-fade-in" />
       <div
         className={cn('relative w-full max-w-[380px] rounded-2xl border shadow-2xl animate-scale-in overflow-hidden', isDarkMode ? 'bg-[#2f2f2f] border-[#424242]' : 'bg-white border-gray-200')}
         onClick={(e) => e.stopPropagation()}

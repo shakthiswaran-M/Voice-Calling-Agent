@@ -3,12 +3,12 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useChatStore } from '../../store/useChatStore';
 import { MessageBubble, TtsState } from './MessageBubble';
-import { ChatInput } from './ChatInput';
+import { ChatInput, type ChatInputHandle } from './ChatInput';
 import { SpeechToSpeechMode } from './SpeechToSpeechMode';
 import { MessageSearch } from './MessageSearch';
 import { ContextMenu, Copy, Reply, Pin, Forward } from './ContextMenu';
 import { useAutoScroll } from '../../hooks/useAutoScroll';
-import { ArrowDown, Menu, Search, Printer, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowDown, Search, Printer, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn, normalizeNetkathir, TIMELINE_GAP_MS } from '../../lib/utils';
 import { webmBlobToWav } from '../../lib/audioWav';
 import { sendChatMessage, sendChatMessageStream, transcribeAudio, synthesizeSpeech, ApiError } from '../../lib/api';
@@ -23,12 +23,14 @@ const FALLBACK_ERROR_RESPONSE =
 export function ChatArea() {
   const {
     threads, activeThreadId, addMessage, createThread, updateThreadTitle,
-    setThreadSessionId, toggleSidebar, isDarkMode, saveScrollPosition,
+    setThreadSessionId, isDarkMode, saveScrollPosition,
     scrollPositions, markThreadRead, incrementUnread, togglePinMessage,
     setReplyTo, removeMessage,
   } = useChatStore();
-  const activeThread = threads.find((t) => t.id === activeThreadId);
-  const messages = activeThread?.messages || [];
+  const activeThread = threads.find((t: { id: string | null }) => t.id === activeThreadId);
+  const messages: Message[] = activeThread?.messages || [];
+
+  const chatInputRef = useRef<ChatInputHandle>(null);
 
   // ── Scroll restoration ──
   const [restorationTarget, setRestorationTarget] = useState<{ messageId: string; offset: number } | null>(null);
@@ -53,7 +55,7 @@ export function ChatArea() {
 
   // ── Reply ──
   const replyToMessage = activeThread?.replyTo
-    ? messages.find(m => m.id === activeThread.replyTo)
+    ? messages.find((m: Message) => m.id === activeThread.replyTo)
     : null;
 
   // ── Share modal ──
@@ -242,7 +244,7 @@ export function ChatArea() {
   // ── Track unread for other threads ──
   const prevMsgCountRef = useRef<Record<string, number>>({});
   useEffect(() => {
-    threads.forEach(t => {
+    threads.forEach((t: { id: string; messages: Message[] }) => {
       if (!t.id) return;
       const prev = prevMsgCountRef.current[t.id] || 0;
       const curr = t.messages.length;
@@ -254,16 +256,32 @@ export function ChatArea() {
   }, [threads, activeThreadId, incrementUnread]);
 
   // ── Chat handlers ──
-  const handleSendMessage = async (content: string) => {
-    const threadId = activeThreadId || createThread().id;
-    const thread = useChatStore.getState().threads.find((t) => t.id === threadId);
+  const ensureThreadForFirstMessage = useCallback((content: string) => {
+    let threadId = activeThreadId;
+
+    if (!threadId) {
+      const created = createThread();
+      threadId = created.id;
+    }
+
+    const thread = useChatStore.getState().threads.find((t: { id: string }) => t.id === threadId);
     if (thread && thread.messages.length === 0) {
       const title = content.length > 40 ? content.substring(0, 40) + '...' : content;
       updateThreadTitle(threadId, title);
     }
+
+    return { threadId, thread };
+  }, [activeThreadId, createThread, updateThreadTitle]);
+
+  const handleSendMessage = async (content: string) => {
+    if (isSending || !content.trim()) return;
+
+    const { threadId, thread } = ensureThreadForFirstMessage(content);
+    const resolvedThread = thread ?? useChatStore.getState().threads.find((t: { id: string }) => t.id === threadId);
+
     // If replying to a message, prepend reference
     let sendContent = content;
-    const replyMsg = thread?.replyTo ? thread.messages.find(m => m.id === thread.replyTo) : null;
+    const replyMsg = resolvedThread?.replyTo ? resolvedThread.messages.find((m: Message) => m.id === resolvedThread.replyTo) : null;
     if (replyMsg) {
       sendContent = 'Replying to: "' + replyMsg.content.substring(0, 100) + '"\n\n' + content;
     }
@@ -283,10 +301,10 @@ export function ChatArea() {
           streamedReply += chunk;
           useChatStore.getState().updateMessage(threadId, placeholderId, streamedReply);
         },
-        thread?.sessionId,
+        resolvedThread?.sessionId,
       );
       if (!streamedReply) useChatStore.getState().updateMessage(threadId, botMessageId, '(no response)');
-      if (!thread?.sessionId && session_id) setThreadSessionId(threadId, session_id);
+      if (!resolvedThread?.sessionId && session_id) setThreadSessionId(threadId, session_id);
     } catch (err) {
       const message = err instanceof ApiError ? err.message : FALLBACK_ERROR_RESPONSE;
       if (botMessageId) {
@@ -307,7 +325,10 @@ export function ChatArea() {
 
 
   const handleStartConversation = async () => {
-    if (isRecording) { mediaRecorderRef.current?.stop(); setIsRecording(false); return; }
+    if (isSending || isRecording) {
+      if (isRecording) { mediaRecorderRef.current?.stop(); setIsRecording(false); }
+      return;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
@@ -316,23 +337,33 @@ export function ChatArea() {
       recorder.onstop = async () => {
         stream.getTracks().forEach((track) => track.stop());
         const webmBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const threadId = activeThreadId || createThread().id;
         setIsSending(true);
         try {
           // Convert WebM → 16-bit PCM WAV before upload (see lib/audioWav.ts).
           const audioBlob = await webmBlobToWav(webmBlob);
           const transcript = normalizeNetkathir(await transcribeAudio(audioBlob));
           if (!transcript || !transcript.trim()) {
-            addMessage(threadId, { role: 'bot', content: "Sorry, I didn't catch that." }); return;
+            addMessage(activeThreadId || createThread().id, { role: 'bot', content: "Sorry, I didn't catch that." });
+            return;
           }
+
+          let threadId = activeThreadId;
+          if (!threadId) {
+            const created = createThread();
+            threadId = created.id;
+            const title = transcript.trim().length > 40 ? transcript.trim().substring(0, 40) + '...' : transcript.trim();
+            updateThreadTitle(threadId, title);
+          }
+
           addMessage(threadId, { role: 'user', content: transcript });
-          const thread = useChatStore.getState().threads.find((t) => t.id === threadId);
-          const { reply, session_id } = await sendChatMessage(transcript, thread?.sessionId);
-          if (!thread?.sessionId) setThreadSessionId(threadId, session_id);
+          const latestThread = useChatStore.getState().threads.find((t: { id: string }) => t.id === threadId);
+          const { reply, session_id } = await sendChatMessage(transcript, latestThread?.sessionId);
+          if (!latestThread?.sessionId) setThreadSessionId(threadId, session_id);
           addMessage(threadId, { role: 'bot', content: reply || '(no response)' });
           playTts(threadId, reply || '(no response)');
         } catch (err) {
           const message = err instanceof ApiError ? err.message : FALLBACK_ERROR_RESPONSE;
+          const threadId = activeThreadId || createThread().id;
           addMessage(threadId, { role: 'bot', content: message });
         } finally { setIsSending(false); }
       };
@@ -341,9 +372,8 @@ export function ChatArea() {
     } catch (err) { console.error('Microphone access denied or unavailable:', err); }
   };
 
-  useEffect(() => {
-    if (!activeThreadId && threads.length === 0) createThread();
-  }, [activeThreadId, threads.length, createThread]);
+  // No auto-created empty thread. A fresh draft should remain unsaved until the
+  // first real message is sent, at which point the create-on-send path below runs.
 
   // ── Context menu handler ──
   const handleContextMenu = useCallback((e: React.MouseEvent, msg: Message) => {
@@ -398,40 +428,72 @@ export function ChatArea() {
       const target = e.target as HTMLElement;
       const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
 
+      // 1. Handle existing shortcuts first
       // Ctrl+F / Cmd+F — search
       if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
         e.preventDefault();
         setSearchOpen(true);
+        return;
       }
 
       // Ctrl+P / Cmd+P — print
       if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
         e.preventDefault();
         handlePrint();
+        return;
       }
 
       // Ctrl+Shift+C / Cmd+Shift+C — copy last bot reply
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'C' || e.key === 'c')) {
         e.preventDefault();
-        const lastBot = [...messages].reverse().find(m => m.role === 'bot');
+        const lastBot = [...messages].reverse().find((m: Message) => m.role === 'bot');
         if (lastBot) {
           navigator.clipboard.writeText(lastBot.content);
         }
+        return;
       }
 
       // Arrow keys — message navigation (only when not in input)
       if (!isInput && !searchOpen) {
         if (e.key === 'ArrowUp') {
           e.preventDefault();
-          const currentIdx = messages.findIndex(m => m.id === selectedMsgId);
+          const currentIdx = messages.findIndex((m: Message) => m.id === selectedMsgId);
           if (currentIdx > 0) navigateToMessage(messages[currentIdx - 1].id);
           else if (currentIdx === -1 && messages.length > 0) navigateToMessage(messages[messages.length - 1].id);
         }
         if (e.key === 'ArrowDown') {
           e.preventDefault();
-          const currentIdx = messages.findIndex(m => m.id === selectedMsgId);
+          const currentIdx = messages.findIndex((m: Message) => m.id === selectedMsgId);
           if (currentIdx >= 0 && currentIdx < messages.length - 1) navigateToMessage(messages[currentIdx + 1].id);
           else if (currentIdx === -1 && messages.length > 0) navigateToMessage(messages[0].id);
+        }
+      }
+
+      // 2. Type-to-focus: route printable physical-keyboard typing into the composer.
+      // Skipped when typing already has a home (input/textarea/contenteditable —
+      // e.g. the conversation search field) and whenever a shortcut modifier is
+      // held, so Ctrl+F / Ctrl+P / Ctrl+Shift+C and friends stay untouched.
+      if (
+        !isInput &&
+        !searchOpen &&
+        !e.ctrlKey && !e.metaKey && !e.altKey &&
+        !e.isComposing && e.keyCode !== 229 && // IME composition (Tamil/Indic keyboards)
+        e.key.length === 1 // printable characters only (letters, digits, symbols, space)
+      ) {
+        const el = target as HTMLElement;
+        // Never steal focus from interactive controls: buttons, selects, links
+        // and ARIA widget/textbox roles keep focus and their own key handling.
+        const onInteractive =
+          el.tagName === 'BUTTON' ||
+          el.tagName === 'SELECT' ||
+          el.tagName === 'A' ||
+          el.tagName === 'SUMMARY' ||
+          !!el.closest?.('button, select, a[href], summary, [role="button"], [role="menuitem"], [role="option"], [role="tab"], [role="textbox"], [contenteditable="true"]');
+        if (!onInteractive) {
+          chatInputRef.current?.focus();
+          // No preventDefault/stopPropagation: focus() ran synchronously inside
+          // this keydown, so the browser dispatches the pressed character to the
+          // now-focused textarea — first character preserved, never duplicated.
         }
       }
     };
@@ -447,7 +509,7 @@ export function ChatArea() {
     ? document.querySelector<HTMLInputElement>('input[placeholder="Search conversation..."]')?.value || ''
     : '';
 
-  const pinnedMessages = messages.filter((m) => m.pinned);
+  const pinnedMessages = messages.filter((m: Message) => m.pinned);
   // Most recently pinned first (newest pinnedAt, fallback to timestamp)
   const pinnedByRecency = pinnedMessages.length > 0
     ? [...pinnedMessages].sort((a, b) => (b.pinnedAt || b.timestamp) - (a.pinnedAt || a.timestamp))
@@ -484,11 +546,9 @@ export function ChatArea() {
             <p>Date: {new Date().toLocaleDateString()}</p>
           </div>
 
-          {/* Top bar */}
+          {/* Top bar — sidebar access is provided by the always-visible
+              compact icon rail, so no hamburger button here. */}
           <div className={cn('flex items-center gap-2 px-4 py-3 border-b shrink-0 safe-area-top', isDarkMode ? 'border-[#2f2f2f]' : 'border-green-100')}>
-            <button onClick={toggleSidebar} className={cn('p-2 -ml-1 rounded-xl transition-all duration-200 active:scale-95', isDarkMode ? 'hover:bg-green-500/10' : 'hover:bg-green-50')} aria-label="Open sidebar">
-              <Menu className={cn('w-5 h-5', isDarkMode ? 'text-green-300/60' : 'text-green-600')} />
-            </button>
             <span className={cn('font-display text-sm font-semibold truncate flex-1', isDarkMode ? 'text-[#ececec]' : 'text-midnight-900')}>{activeThread?.title}</span>
             <button onClick={() => setSearchOpen(!searchOpen)} className={cn('p-2 rounded-xl transition-all duration-200', isDarkMode ? 'hover:bg-green-500/10 text-white/40' : 'hover:bg-green-50 text-gray-400')} aria-label="Search conversation">
               <Search className="w-4 h-4" />
@@ -572,7 +632,7 @@ export function ChatArea() {
                 <div className="editorial-rule w-12 sm:w-16 mx-auto mt-3 sm:mt-4" />
               </div>
 
-              {messages.map((msg, i) => {
+              {messages.map((msg: Message, i: number) => {
                 const prevMsg = i > 0 ? messages[i - 1] : null;
                 const showTimeline = !prevMsg || (msg.timestamp - prevMsg.timestamp > TIMELINE_GAP_MS);
                 const timelineDate = new Date(msg.timestamp);
@@ -611,7 +671,7 @@ export function ChatArea() {
               })}
               {isScrolledUp && (
                 <div className="flex justify-center sticky bottom-4 z-10 animate-fade-in-up">
-                  <button onClick={() => { setRestorationTarget(null); scrollToBottom(true); }} className={cn('flex items-center gap-2 px-4 py-2 backdrop-blur-sm text-white rounded-full shadow-lg transition-all duration-300 active:scale-95 hover:shadow-xl', isDarkMode ? 'bg-green-500/90 shadow-[0_4px_20px_rgba(34,197,94,0.3)]' : 'bg-green-600 shadow-[0_4px_20px_rgba(22,163,74,0.25)]')}>
+                  <button onClick={() => { setRestorationTarget(null); scrollToBottom(true); }} className={cn('flex items-center gap-2 px-4 py-2 text-white rounded-full shadow-lg transition-all duration-300 active:scale-95 hover:shadow-xl', isDarkMode ? 'bg-green-500/90 shadow-[0_4px_20px_rgba(34,197,94,0.3)]' : 'bg-green-600 shadow-[0_4px_20px_rgba(22,163,74,0.25)]')}>
                     <ArrowDown className="w-3.5 h-3.5" />
                     {showScrollButton && (
                       <span className="text-[11px] font-medium">New messages</span>
@@ -623,8 +683,9 @@ export function ChatArea() {
           </div>
           <div className="shrink-0 safe-area-bottom">
             <ChatInput
+              ref={chatInputRef}
               onSend={handleSendMessage}
-              disabled={!activeThreadId || isSending}
+              disabled={isSending}
               isDarkMode={isDarkMode}
               onVoiceToggle={handleStartConversation}
               onSpeechToSpeechToggle={() => setSpeechToSpeechOpen(true)}
@@ -636,20 +697,8 @@ export function ChatArea() {
         </>
       ) : (
         <div className="flex-1 flex flex-col min-h-0 relative">
-          <button
-            onClick={toggleSidebar}
-            className={cn(
-              'lg:hidden fixed top-4 left-4 z-50',
-              'w-11 h-11 flex items-center justify-center rounded-xl',
-              'shadow-lg transition-all duration-300 active:scale-95',
-              isDarkMode
-                ? 'bg-[#0A1628]/95 border border-white/10 text-white/70 hover:bg-white/10'
-                : 'bg-white/95 border border-green-200 text-green-600 hover:bg-green-50 shadow-float'
-            )}
-            aria-label="Open sidebar"
-          >
-            <Menu className="w-5 h-5" />
-          </button>
+          {/* Empty state: no hamburger — the compact icon rail provides
+              sidebar access on every viewport width. */}
           <div className="flex-1 flex flex-col items-center justify-center px-6 min-h-0 safe-area-top">
             <img src={logo} alt="Netkathir" className="w-56 h-56 sm:w-72 sm:h-72 md:w-80 md:h-80 object-contain mb-6 sm:mb-8 drop-shadow-lg" />
             <h1 className={cn('font-display text-xl sm:text-2xl md:text-3xl font-bold text-center mb-2 message-slide-in', isDarkMode ? 'text-[#ececec]' : 'text-midnight-900')} style={{ animationDelay: '0.1s' }}>
@@ -660,14 +709,14 @@ export function ChatArea() {
             </p>
           </div>
           <div className="shrink-0 safe-area-bottom">
-            <ChatInput onSend={handleSendMessage} disabled={!activeThreadId || isSending} isCentered isDarkMode={isDarkMode} onVoiceToggle={handleStartConversation} onSpeechToSpeechToggle={() => setSpeechToSpeechOpen(true)} isRecording={isRecording} />
+            <ChatInput ref={chatInputRef} onSend={handleSendMessage} disabled={isSending} isCentered isDarkMode={isDarkMode} onVoiceToggle={handleStartConversation} onSpeechToSpeechToggle={() => setSpeechToSpeechOpen(true)} isRecording={isRecording} />
           </div>
         </div>
       )}
 
       <SpeechToSpeechMode
         isOpen={speechToSpeechOpen}
-        disabled={!activeThreadId || isSending || isRecording}
+        disabled={isSending || isRecording}
         isDarkMode={isDarkMode}
         onClose={() => setSpeechToSpeechOpen(false)}
       />
@@ -687,7 +736,7 @@ export function ChatArea() {
       {shareThreadId && (
         <ShareModal
           threadId={shareThreadId}
-          threadTitle={threads.find((t) => t.id === shareThreadId)?.title || ''}
+          threadTitle={threads.find((t: { id: string | null }) => t.id === shareThreadId)?.title || ''}
           isDarkMode={isDarkMode}
           onClose={() => setShareThreadId(null)}
         />

@@ -177,7 +177,7 @@ export function SpeechToSpeechMode({
 
   const [errorMessage, setErrorMessage] = useState('');
 
-  const [isListening, setIsListening] = useState(false);
+  const [, setIsListening] = useState(false);
 
   const [isResponseAtBottom, setIsResponseAtBottom] = useState(true);
 

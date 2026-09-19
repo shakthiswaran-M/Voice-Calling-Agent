@@ -7,7 +7,7 @@ import { useChatStore } from './store/useChatStore';
 import { cn } from './lib/utils';
 
 function App() {
-  const { isDarkMode, toggleSidebar, createThread } = useChatStore();
+  const { isDarkMode, toggleSidebar } = useChatStore();
 
   useEffect(() => {
     if (isDarkMode) {
@@ -17,36 +17,49 @@ function App() {
     }
   }, [isDarkMode]);
 
+  // One-time healing after store rehydration: there must always be at least
+  // one thread, and activeThreadId must point at an existing thread. Runs
+  // once synchronously on mount — thread operations below keep it valid.
+  useEffect(() => {
+    useChatStore.getState().ensureConsistency();
+  }, []);
+
+  // Desktop collapse state and mobile drawer state are intentionally independent.
+  // We do not resize-reset the sidebar state on viewport changes, because that
+  // causes flicker and unexpected toggles while the user is interacting.
+
   // Keyboard shortcuts
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    // Ctrl+K or Cmd+K → focus search (opens sidebar)
+    // Ctrl+K or Cmd+K → focus search (opens the sidebar at any width)
     if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
       e.preventDefault();
+      const isDesktop = window.innerWidth >= 1024;
       const store = useChatStore.getState();
-      if (!store.isSidebarOpen) store.toggleSidebar();
+      const alreadyOpen = isDesktop ? store.isSidebarOpen : store.isMobileSidebarOpen;
+      if (!alreadyOpen) store.toggleSidebar();
       setTimeout(() => {
         const input = document.querySelector<HTMLInputElement>('input[placeholder*="Search"]');
         input?.focus();
       }, 350);
     }
-    // Ctrl+N or Cmd+N → new chat
+    // Ctrl+N or Cmd+N → new chat (creates/reuses ONE empty thread and selects it)
     if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
       e.preventDefault();
-      createThread();
+      useChatStore.getState().startNewChat();
     }
     // Ctrl+B or Cmd+B → toggle sidebar
     if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
       e.preventDefault();
       toggleSidebar();
     }
-    // Escape → close sidebar on mobile
+    // Escape → close the drawer on mobile
     if (e.key === 'Escape') {
       const store = useChatStore.getState();
-      if (store.isSidebarOpen && window.innerWidth < 1024) {
+      if (store.isMobileSidebarOpen) {
         store.toggleSidebar();
       }
     }
-  }, [toggleSidebar, createThread]);
+  }, [toggleSidebar]);
 
   useEffect(() => {
     document.addEventListener('keydown', handleKeyDown);

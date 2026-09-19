@@ -6,25 +6,31 @@ import { ChatStore, Thread, Message } from '../types';
 
 const generateId = () => Math.random().toString(36).substring(2, 15);
 
+// Single factory for empty threads — used by New Chat and the last-thread
+// delete fallback so both produce the exact same shape (no fake messages).
+const makeEmptyThread = (): Thread => ({
+  id: generateId(),
+  title: 'New Chat',
+  messages: [],
+  createdAt: Date.now(),
+  updatedAt: Date.now(),
+});
+
 export const useChatStore = create<ChatStore>()(
   persist(
-    (set) => ({
-      threads: [],
+    (set, get) => ({
+      threads: [] as Thread[],
       activeThreadId: null,
       isSidebarOpen: true,
+      isMobileSidebarOpen: false,
       editingThreadId: null,
       isDarkMode: false,
-      scrollPositions: {},
+      isCreatingThread: false,
+      scrollPositions: {} as Record<string, { lastVisibleMessageId: string; scrollOffset: number }>,
 
-      createThread: () => {
-        const newThread: Thread = {
-          id: generateId(),
-          title: 'New Chat',
-          messages: [],
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        };
-        set((state) => ({
+      createThread: (): Thread => {
+        const newThread = makeEmptyThread();
+        set((state: ChatStore) => ({
           threads: [newThread, ...state.threads],
           activeThreadId: newThread.id,
         }));
@@ -33,14 +39,34 @@ export const useChatStore = create<ChatStore>()(
 
       deleteThread: (threadId: string) => {
         set((state) => {
-          const newThreads = state.threads.filter((t) => t.id !== threadId);
+          const remaining = state.threads.filter((t) => t.id !== threadId);
           const { [threadId]: _removed, ...restPositions } = state.scrollPositions;
+
+          // NEVER allow zero threads: deleting the last thread creates exactly
+          // ONE empty fallback thread, selected immediately (idempotent — this
+          // is a single synchronous store update, so no effect/refresh can
+          // double-fire it).
+          if (remaining.length === 0) {
+            const fallback = makeEmptyThread();
+            return {
+              threads: [fallback],
+              scrollPositions: restPositions,
+              activeThreadId: fallback.id,
+            };
+          }
+
+          // Keep the active thread if it survived; otherwise select the most
+          // recently updated remaining thread. activeThreadId must never point
+          // at a deleted/non-existent thread.
+          const activeStillExists = remaining.some((t) => t.id === state.activeThreadId);
+          const nextActiveId = activeStillExists
+            ? state.activeThreadId
+            : [...remaining].sort((a, b) => b.updatedAt - a.updatedAt)[0].id;
+
           return {
-            threads: newThreads,
+            threads: remaining,
             scrollPositions: restPositions,
-            activeThreadId: state.activeThreadId === threadId
-              ? newThreads.length > 0 ? newThreads[0].id : null
-              : state.activeThreadId,
+            activeThreadId: nextActiveId,
           };
         });
       },
@@ -61,8 +87,41 @@ export const useChatStore = create<ChatStore>()(
         }));
       },
 
-      setActiveThread: (threadId: string) => {
+      setActiveThread: (threadId: string | null) => {
         set({ activeThreadId: threadId });
+      },
+
+      startNewChat: (): Thread => {
+        const state = get();
+        // Idempotent New Chat: if a valid empty "New Chat" thread already
+        // exists, reuse it instead of creating another one (protects against
+        // rapid clicks / repeated shortcuts producing duplicate empties).
+        const emptyThread = state.threads.find(
+          (t) => t.messages.length === 0 && t.title === 'New Chat'
+        );
+        if (emptyThread) {
+          set({ activeThreadId: emptyThread.id });
+          return emptyThread;
+        }
+        return get().createThread();
+      },
+
+      // One-time session healing after store rehydration: guarantees the
+      // invariant "at least one thread exists" and "activeThreadId is valid".
+      ensureConsistency: () => {
+        const state = get();
+
+        if (state.threads.length === 0) {
+          const fallback = makeEmptyThread();
+          set({ threads: [fallback], activeThreadId: fallback.id });
+          return;
+        }
+
+        const activeExists = state.threads.some((t) => t.id === state.activeThreadId);
+        if (!activeExists) {
+          const mostRecent = [...state.threads].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+          set({ activeThreadId: mostRecent.id });
+        }
       },
 
       addMessage: (threadId: string, message: Omit<Message, 'id' | 'timestamp'>) => {
@@ -117,8 +176,25 @@ export const useChatStore = create<ChatStore>()(
         }));
       },
 
-      toggleSidebar: () => set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
-      setSidebarOpen: (open: boolean) => set({ isSidebarOpen: open }),
+      toggleSidebar: () => {
+        if (typeof window !== 'undefined' && window.innerWidth >= 1024) {
+          set((state) => ({ isSidebarOpen: !state.isSidebarOpen, isMobileSidebarOpen: false }));
+          return;
+        }
+
+        set((state) => ({
+          isMobileSidebarOpen: !state.isMobileSidebarOpen,
+          isSidebarOpen: state.isMobileSidebarOpen ? false : true,
+        }));
+      },
+      setSidebarOpen: (open: boolean) => {
+        if (typeof window !== 'undefined' && window.innerWidth >= 1024) {
+          set({ isSidebarOpen: open, isMobileSidebarOpen: false });
+          return;
+        }
+
+        set({ isMobileSidebarOpen: open, isSidebarOpen: open });
+      },
       setEditingThread: (threadId: string | null) => set({ editingThreadId: threadId }),
       toggleDarkMode: () => set((state) => ({ isDarkMode: !state.isDarkMode })),
 

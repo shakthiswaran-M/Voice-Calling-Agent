@@ -85,14 +85,14 @@ export const MessageBubble = memo(function MessageBubble({
   // (The `code` handler narrows its props because react-markdown adds the
   // non-standard `inline` flag on top of the intrinsic `code` element props.)
   const md: Components = {
-    p: ({ children }) => <p className="text-sm leading-relaxed mb-3 last:mb-0">{searchQuery ? highlightChildren(children, searchQuery) : children}</p>,
+    p: ({ children }) => <p className="mb-3 last:mb-0 text-[15px] leading-7 whitespace-pre-wrap">{searchQuery ? highlightChildren(children, searchQuery) : children}</p>,
     strong: ({ children }) => <strong className="font-bold">{searchQuery ? highlightChildren(children, searchQuery) : children}</strong>,
     em: ({ children }) => <em className="italic">{searchQuery ? highlightChildren(children, searchQuery) : children}</em>,
-    ul: ({ children }) => <ul className="list-disc list-inside mb-3 space-y-1 text-sm">{children}</ul>,
-    ol: ({ children }) => <ol className="list-decimal list-inside mb-3 space-y-1 text-sm">{children}</ol>,
-    li: ({ children }) => <li className="leading-relaxed">{searchQuery ? highlightChildren(children, searchQuery) : children}</li>,
+    ul: ({ children }) => <ul className="mb-3 list-disc pl-5 space-y-1 text-[15px] leading-7">{children}</ul>,
+    ol: ({ children }) => <ol className="mb-3 list-decimal pl-5 space-y-1 text-[15px] leading-7">{children}</ol>,
+    li: ({ children }) => <li className="pl-1 leading-7">{searchQuery ? highlightChildren(children, searchQuery) : children}</li>,
     a: ({ href, title, children }) => (
-      <a href={href} title={title} target="_blank" rel="noopener noreferrer" className={cn("underline underline-offset-2 font-medium", isDarkMode ? "text-green-400 hover:text-green-300" : "text-green-600 hover:text-green-700")}>{children}</a>
+      <a href={href} title={title} target="_blank" rel="noopener noreferrer" className={cn("underline underline-offset-2 font-medium break-words", isDarkMode ? "text-green-400 hover:text-green-300" : "text-green-600 hover:text-green-700")}>{children}</a>
     ),
     code: (props) => {
       const { inline = false, className, children } = props as { inline?: boolean; className?: string; children?: React.ReactNode };
@@ -104,17 +104,17 @@ export const MessageBubble = memo(function MessageBubble({
         </div>
       );
     },
-    pre: ({ children }) => <pre>{children}</pre>,
-    h1: ({ children }) => <h1 className="text-lg font-bold mb-3 mt-2">{children}</h1>,
-    h2: ({ children }) => <h2 className="text-base font-bold mb-2 mt-2">{children}</h2>,
-    h3: ({ children }) => <h3 className="text-sm font-bold mb-2 mt-1">{children}</h3>,
+    pre: ({ children }) => <pre className="mb-3 overflow-x-auto rounded-lg p-4 text-[13px] leading-relaxed">{children}</pre>,
+    h1: ({ children }) => <h1 className="mt-0 mb-3 text-lg font-bold leading-snug">{children}</h1>,
+    h2: ({ children }) => <h2 className="mt-0 mb-3 text-base font-bold leading-snug">{children}</h2>,
+    h3: ({ children }) => <h3 className="mt-0 mb-2 text-sm font-bold leading-snug">{children}</h3>,
     blockquote: ({ children }) => (
-      <blockquote className={cn("border-l-2 pl-4 py-1 mb-3 italic", isDarkMode ? "border-green-500/40 text-white/60" : "border-green-400 text-gray-600")}>{children}</blockquote>
+      <blockquote className={cn("mb-3 border-l-2 pl-4 py-1 italic leading-7", isDarkMode ? "border-green-500/40 text-white/60" : "border-green-400 text-gray-600")}>{children}</blockquote>
     ),
     hr: () => <hr className={cn("my-4 border-0 h-px", isDarkMode ? "bg-white/10" : "bg-gray-200")} />,
-    table: ({ style, children }) => <div className="overflow-x-auto mb-3"><table style={style} className={cn("w-full text-sm border-collapse", isDarkMode ? "text-white/70" : "text-gray-700")}>{children}</table></div>,
+    table: ({ style, children }) => <div className="mb-3 overflow-x-auto"><table style={style} className={cn("w-full border-collapse text-sm", isDarkMode ? "text-white/70" : "text-gray-700")}>{children}</table></div>,
     th: ({ style, children }) => <th style={style} className={cn("px-3 py-2 text-left text-xs font-semibold border-b", isDarkMode ? "border-white/10 text-white/50" : "border-gray-200 text-gray-500")}>{children}</th>,
-    td: ({ style, children }) => <td style={style} className={cn("px-3 py-2 border-b", isDarkMode ? "border-white/5" : "border-gray-100")}>{children}</td>,
+    td: ({ style, children }) => <td style={style} className={cn("px-3 py-2 border-b align-top", isDarkMode ? "border-white/5" : "border-gray-100")}>{children}</td>,
   };
 
   /* ─── Button styles ─── */
@@ -154,7 +154,9 @@ export const MessageBubble = memo(function MessageBubble({
             <div className="w-6 h-6 rounded-lg bg-green-500 flex items-center justify-center shadow-sm"><User className="w-3 h-3 text-white" /></div>
           </div>
           <div className={cn("rounded-2xl rounded-tr-md px-5 py-4 transition-all duration-300 cursor-default", isSelected && "ring-2 ring-green-400/50", isDarkMode ? "bg-[#2f2f2f] border border-[#424242] text-[#ececec]" : "bg-green-50 border border-green-200 text-midnight-900")}>
-            <p className="text-sm leading-relaxed whitespace-pre-wrap cursor-default select-text">{searchQuery ? highlightText(message.content, searchQuery) : message.content}</p>
+            <p className={cn("text-sm leading-relaxed whitespace-pre-wrap cursor-default select-text prose-custom", isDarkMode ? "text-[#ececec]" : "text-midnight-900")}>
+              {searchQuery ? highlightText(message.content, searchQuery) : message.content}
+            </p>
           </div>
         </div>
       ) : (
