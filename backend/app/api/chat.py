@@ -15,6 +15,7 @@ from app.providers.llm import (
     clean_response,
     client,
     generate_response,
+    get_relevant_history,
     is_netkathir_related,
 )
 
@@ -127,14 +128,31 @@ def update_context(context: dict, message: str) -> dict:
             break
 
     if len(message.strip()) > 3:
-
-        important_facts = context["conversation"].setdefault(
-            "important_facts",
-            []
+        message_lower = message.lower()
+        follow_up_keywords = (
+            "this",
+            "that",
+            "it",
+            "they",
+            "them",
+            "those",
+            "earlier",
+            "before",
+            "previous",
+            "mentioned",
+            "company",
+            "business",
+            "organization",
         )
 
-        if message not in important_facts:
-            important_facts.append(message)
+        if any(keyword in message_lower for keyword in follow_up_keywords):
+            important_facts = context["conversation"].setdefault(
+                "important_facts",
+                []
+            )
+            if message.strip() not in important_facts:
+                important_facts.append(message.strip())
+                context["conversation"]["important_facts"] = important_facts[-3:]
 
     return context
 
@@ -180,12 +198,16 @@ async def chat(req: ChatRequest):
         await database.save_context(session_id, context)
         return ChatResponse(reply=reply, session_id=session_id)
 
+    relevant_history = get_relevant_history(req.message, history)
+    if not relevant_history:
+        context_message = ""
+
     try:
 
         # Call LLM provider
         reply, current_turn = await generate_response(
             message=req.message,
-            history=history,
+            history=relevant_history,
             context_message=context_message,
         )
 
@@ -345,7 +367,11 @@ async def _stream_chat_generator(message: str, session_id: str):
         yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
         return
 
-    messages = await _build_messages(message, history, context_message)
+    relevant_history = get_relevant_history(message, history)
+    if not relevant_history:
+        context_message = ""
+
+    messages = await _build_messages(message, relevant_history, context_message)
     current_turn = [messages[-1]]
     try:
         # Phase 1: tool calling (non-streaming) — typically 0-2 rounds

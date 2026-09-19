@@ -61,6 +61,16 @@ NETKATHIR_CONTEXT_TERMS = (
     "hr",
 )
 
+GREETINGS = (
+    "hi",
+    "hello",
+    "hey",
+    "good morning",
+    "good evening",
+    "welcome",
+    "greetings",
+)
+
 
 def _normalize_scope_text(value: str) -> str:
     """Normalize text for safe deterministic scope checks."""
@@ -83,6 +93,35 @@ def _history_text(history: list | None) -> str:
     return " ".join(parts)
 
 
+def get_relevant_history(message: str, history: list | None = None, max_messages: int = 4) -> list:
+    """Only include earlier conversation when the user explicitly refers back to it."""
+    if not history:
+        return []
+
+    message_text = _normalize_scope_text(message)
+    if not message_text:
+        return []
+
+    follow_up_patterns = (
+        r"\b(?:this|that|it|they|them|those|these|earlier|before|previous|mentioned|you mentioned|you said|that one|this one|itself|what about|what was|who was|where was|tell me more about it|give me that|give me this|the above|the previous one|the first one|his|her|their|the email|the link|the website|the address|the phone|the phone number|the contact|what was it|what was his|what was her|what was their)\b"
+    )
+    if not re.search(follow_up_patterns, message_text):
+        return []
+
+    relevant: list[dict] = []
+    for item in reversed(history):
+        if not isinstance(item, dict):
+            continue
+        content = (item.get("content") or "").strip()
+        if not content:
+            continue
+        relevant.append({"role": item.get("role", "user"), "content": content})
+        if len(relevant) >= max_messages:
+            break
+
+    return list(reversed(relevant))
+
+
 def is_netkathir_related(
     message: str,
     history: list | None = None,
@@ -93,30 +132,21 @@ def is_netkathir_related(
         return False
 
     message_text = _normalize_scope_text(message)
-    history_text = _normalize_scope_text(_history_text(history))
     context_text = _normalize_scope_text(context_message)
 
     if any(term in message_text for term in NETKATHIR_EXPLICIT_TERMS):
         return True
-    if any(term in history_text for term in NETKATHIR_EXPLICIT_TERMS):
+    if any(term in message_text for term in NETKATHIR_CONTEXT_TERMS):
         return True
-    if any(term in context_text for term in NETKATHIR_EXPLICIT_TERMS):
-        return True
-
-    follow_up_patterns = (
-        r"\b(?:this|that|it|they|them|those|which one|one is|related to|used for|for hr|for this|that one)\b"
-    )
-    if re.search(follow_up_patterns, message_text) and (
-        any(term in history_text for term in NETKATHIR_EXPLICIT_TERMS)
-        or any(term in history_text for term in NETKATHIR_CONTEXT_TERMS)
-        or any(term in context_text for term in NETKATHIR_CONTEXT_TERMS)
-    ):
+    if any(greeting in message_text for greeting in GREETINGS):
         return True
 
-    if re.search(
-        r"\b(?:company|business|organization)\b",
-        message_text,
-    ) and (
+    if history:
+        history_text = _normalize_scope_text(_history_text(get_relevant_history(message, history)))
+    else:
+        history_text = ""
+
+    if re.search(r"\b(?:this|that|it|they|them|those|these|earlier|before|previous|mentioned|you mentioned|you said|that one|this one|itself|what about|what was|who was|where was|tell me more about it|give me that|give me this|the above|the previous one|the first one|his|her|their|the email|the link|the website|the address|the phone|the phone number|the contact|what was it|what was his|what was her|what was their)\b", message_text) and (
         any(term in history_text for term in NETKATHIR_EXPLICIT_TERMS)
         or any(term in history_text for term in NETKATHIR_CONTEXT_TERMS)
         or any(term in context_text for term in NETKATHIR_EXPLICIT_TERMS)
@@ -133,21 +163,14 @@ def get_scope_restriction_response() -> str:
 
 
 def clean_response(text: str) -> str:
-    """Remove Markdown formatting for clean text and voice output."""
+    """Normalize formatting without stripping Markdown structure."""
 
     if not text:
         return ""
 
-    text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)
-    text = re.sub(r"\*(.*?)\*", r"\1", text)
-    text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)
-    text = re.sub(r"^\s*[-*+]\s+", "", text, flags=re.MULTILINE)
-    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
-
-    text = text.replace("*", "").replace("`", "")
-
-    text = re.sub(r"[ \t]+", " ", text)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"[ \t]+\n", "\n", text)
 
     return text.strip()
 
@@ -165,6 +188,8 @@ async def generate_response(
         current_turn: Messages generated during the current turn
     """
 
+    relevant_history = get_relevant_history(message, history)
+
     messages = [
         {
             "role": "system",
@@ -176,7 +201,7 @@ async def generate_response(
         }
     ]
 
-    if context_message:
+    if context_message and relevant_history:
         messages.append(
             {
                 "role": "system",
@@ -184,8 +209,8 @@ async def generate_response(
             }
         )
 
-    # Add previous conversation history
-    messages.extend(history)
+    # Add only genuinely needed conversation context.
+    messages.extend(relevant_history)
 
     # Add current user message
     messages.append(
