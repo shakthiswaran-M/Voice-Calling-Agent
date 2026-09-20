@@ -121,7 +121,7 @@ async def faq_lookup(topic: str) -> dict:
 
 
 async def search_website_content(query: str) -> dict:
-    """Search the NetKathir website content for information not covered by other tools."""
+    """Search relevant NetKathir website content and return verified details for the answer."""
     if not query.strip():
         return {"error": "Query is required."}
 
@@ -203,7 +203,7 @@ TOOL_SCHEMAS = [
     }},
     {"type": "function", "function": {
         "name": "search_website_content",
-        "description": "Search the NetKathir website content for general company information not covered by other tools — e.g. blog topics, product details, project info.",
+        "description": "Search relevant NetKathir website content for verified company information not covered by other tools, including detailed product, service, project, founder, contact, and company-overview information. Use the user's exact question as the query so the most relevant page is returned.",
         "parameters": {"type": "object", "properties": {
             "query": {"type": "string", "description": "The topic or question to search the website content for."}
         }, "required": ["query"]},

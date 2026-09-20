@@ -13,6 +13,7 @@ import { cn, normalizeNetkathir, TIMELINE_GAP_MS } from '../../lib/utils';
 import { webmBlobToWav } from '../../lib/audioWav';
 import { sendChatMessage, sendChatMessageStream, transcribeAudio, synthesizeSpeech, ApiError } from '../../lib/api';
 import { cancelBrowserTts, speakWithBrowserTts } from '../../lib/browserTts';
+import { cleanVoiceText } from '../../lib/voiceText';
 import { ShareModal } from './ShareModal';
 import logo from '../../assets/netkathir-logo.png';
 import type { Message } from '../../types';
@@ -99,6 +100,8 @@ export function ChatArea() {
   }, [ttsState]);
 
   const playTts = useCallback(async (msgId: string, text: string) => {
+    const speechText = cleanVoiceText(text);
+
     if (ttsMsgId === msgId && ttsState === 'paused' && audioRef.current) {
       audioRef.current.play(); setTtsState('playing'); return;
     }
@@ -130,11 +133,11 @@ export function ChatArea() {
       if (audioUrlRef.current) { URL.revokeObjectURL(audioUrlRef.current); audioUrlRef.current = null; }
       setTtsMsgId(msgId);
       setTtsState('playing');
-      if (!speakWithBrowserTts(text, finishTts)) finishTts();
+      if (!speakWithBrowserTts(speechText, finishTts)) finishTts();
     };
 
     try {
-      const response = await synthesizeSpeech(text, abortController.signal);
+      const response = await synthesizeSpeech(speechText, abortController.signal);
       if (ttsRequestIdRef.current !== requestId) return;
       if (!response.body || typeof MediaSource === 'undefined' || !MediaSource.isTypeSupported('audio/mpeg')) {
         throw new Error('Streaming audio is not supported by this browser');
