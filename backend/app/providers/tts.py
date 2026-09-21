@@ -1,6 +1,7 @@
 import logging
 from collections.abc import Iterator
 from elevenlabs.client import ElevenLabs
+from elevenlabs.types import VoiceSettings
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -14,6 +15,13 @@ def _stream_speech_sync(text: str) -> Iterator[bytes]:
         model_id=settings.elevenlabs_model_id,
         text=text,
         output_format="mp3_44100_128",
+        voice_settings=VoiceSettings(
+            stability=settings.elevenlabs_stability,
+            similarity_boost=settings.elevenlabs_similarity_boost,
+            style=settings.elevenlabs_style,
+            use_speaker_boost=settings.elevenlabs_use_speaker_boost,
+            speed=settings.elevenlabs_speed,
+        ),
     )
     if isinstance(audio, bytes):
         if audio:

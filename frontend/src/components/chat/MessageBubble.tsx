@@ -80,6 +80,20 @@ export const MessageBubble = memo(function MessageBubble({
     return children;
   };
 
+  const isExternalWebUrl = (href?: string): boolean => {
+    if (!href) return false;
+
+    try {
+      const url = new URL(href, window.location.href);
+      return (
+        (url.protocol === 'http:' || url.protocol === 'https:') &&
+        url.origin !== window.location.origin
+      );
+    } catch {
+      return false;
+    }
+  };
+
   /* ─── Markdown renderers ─── */
   // Typed with react-markdown's Components so no `any` leaks into the map.
   // (The `code` handler narrows its props because react-markdown adds the
@@ -91,9 +105,21 @@ export const MessageBubble = memo(function MessageBubble({
     ul: ({ children }) => <ul className="mb-3 list-disc pl-5 space-y-1 text-[15px] leading-7">{children}</ul>,
     ol: ({ children }) => <ol className="mb-3 list-decimal pl-5 space-y-1 text-[15px] leading-7">{children}</ol>,
     li: ({ children }) => <li className="pl-1 leading-7">{searchQuery ? highlightChildren(children, searchQuery) : children}</li>,
-    a: ({ href, title, children }) => (
-      <a href={href} title={title} target="_blank" rel="noopener noreferrer" className={cn("underline underline-offset-2 font-medium break-words", isDarkMode ? "text-green-400 hover:text-green-300" : "text-green-600 hover:text-green-700")}>{children}</a>
-    ),
+    a: ({ href, title, children }) => {
+      const opensInNewTab = isExternalWebUrl(href);
+
+      return (
+        <a
+          href={href}
+          title={title}
+          target={opensInNewTab ? '_blank' : undefined}
+          rel={opensInNewTab ? 'noopener noreferrer' : undefined}
+          className={cn("underline underline-offset-2 font-medium break-words", isDarkMode ? "text-green-400 hover:text-green-300" : "text-green-600 hover:text-green-700")}
+        >
+          {children}
+        </a>
+      );
+    },
     code: (props) => {
       const { inline = false, className, children } = props as { inline?: boolean; className?: string; children?: React.ReactNode };
       if (inline) return <code className={cn("px-1.5 py-0.5 rounded-md text-[13px] font-mono", isDarkMode ? "bg-white/10 text-green-300" : "bg-green-100 text-green-800")}>{children}</code>;
