@@ -483,6 +483,29 @@ class Database:
             "about",
         }
 
+        overview_query = any(
+            phrase in query
+            for phrase in (
+                "tell me about",
+                "explain about",
+                "company overview",
+                "company information",
+                "about the company",
+            )
+        )
+        location_query = any(
+            phrase in query
+            for phrase in (
+                "where is",
+                "where are",
+                "headquarters",
+                "office",
+                "offices",
+                "address",
+                "located",
+            )
+        )
+
         keywords = [
             word.strip(".,?!:;()[]{}\"'")
             for word in query.split()
@@ -514,9 +537,10 @@ class Database:
             )
             values.append(f"%{keyword}%")
 
-        # LIMIT parameter comes after all keyword parameters.
-        limit_parameter = len(values) + 1
-        values.append(limit)
+        overview_parameter = len(values) + 1
+        location_parameter = overview_parameter + 1
+        limit_parameter = location_parameter + 1
+        values.extend([overview_query, location_query, limit])
 
         search_sql = f"""
             SELECT
@@ -527,8 +551,10 @@ class Database:
             WHERE {' OR '.join(conditions)}
             ORDER BY
                 CASE
-                    WHEN url ILIKE '%contact%' THEN 0
-                    WHEN url ILIKE '%about%' THEN 1
+                    WHEN ${overview_parameter} AND url ILIKE '%about%' THEN 0
+                    WHEN ${location_parameter} AND url ILIKE '%contact%' THEN 0
+                    WHEN ${location_parameter} AND url ILIKE '%about%' THEN 1
+                    WHEN ${overview_parameter} AND url ILIKE '%contact%' THEN 1
                     WHEN url ILIKE '%services%' THEN 2
                     WHEN url ILIKE '%products%' THEN 3
                     ELSE 4

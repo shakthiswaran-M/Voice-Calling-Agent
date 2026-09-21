@@ -36,6 +36,20 @@ NETKATHIR_EXPLICIT_TERMS = (
 )
 
 NETKATHIR_CONTEXT_TERMS = (
+    "company",
+    "overview",
+    "headquarters",
+    "industry",
+    "industries",
+    "sector",
+    "sectors",
+    "mission",
+    "vision",
+    "employee",
+    "employees",
+    "countries",
+    "serve",
+    "serves",
     "services",
     "service",
     "product",
@@ -47,6 +61,7 @@ NETKATHIR_CONTEXT_TERMS = (
     "leadership",
     "location",
     "office",
+    "offices",
     "contact",
     "working hours",
     "internship",
@@ -89,10 +104,147 @@ CLOSING_QUESTION_PATTERN = (
     r"do|does|did|is|are|tell|explain|provide|give|show)\b"
 )
 
+ACKNOWLEDGEMENT_PHRASES = frozenset(
+    {
+        "good",
+        "great",
+        "nice",
+        "okay",
+        "ok",
+        "alright",
+        "fine",
+        "perfect",
+        "sounds good",
+        "that s good",
+        "that s great",
+        "thats good",
+        "thats great",
+        "cool",
+        "got it",
+        "understood",
+        "sure",
+        "yes",
+        "yeah",
+        "yep",
+        "correct",
+        "exactly",
+        "thats right",
+    }
+)
+
+ACKNOWLEDGEMENT_QUESTION_PATTERNS = (
+    r"\b(?:is|was)\s+that\s+right\b",
+    r"\bdoes\s+that\s+(?:sound|make)\s+(?:right|sense)\b",
+    r"\b(?:right|makes\s+sense)\s*\??$",
+)
+
+PERSONAL_CONTEXT_CANDIDATE_PATTERN = re.compile(
+    r"(?:\bmy\s+name\s+is\b|\bcall\s+me\b|\bthis\s+is\b|\bi['’]?m\b|\bi\s+am\b|\b\w+\s+here\b)",
+    re.IGNORECASE,
+)
+
+INTERNAL_QUERY_PATTERN = re.compile(
+    r"\b(?:database\s+schema|database|postgres(?:ql)?|tables?|columns?|"
+    r"source\s+code|backend|frontend|internal\s+(?:api|architecture|implementation|details)|"
+    r"api\s+keys?|environment\s+variables?|infrastructure|tech\s+stack|"
+    r"llm\s+configuration|model\s+configuration|"
+    r"how\s+(?:(?:this|the)\s+chatbot\s+is\s+implemented|is\s+(?:this|the)\s+chatbot\s+implemented|"
+    r"does\s+(?:this|the)\s+chatbot\s+work)|messages\s+table)\b",
+    re.IGNORECASE,
+)
+
+PERSONAL_CONTEXT_ANALYSIS_PROMPT = """Analyze the user's message for a self-introduction or personal context.
+
+Return JSON only with this exact shape:
+{"intent":"SELF_INTRODUCTION" or "PERSONAL_CONTEXT" or "NONE","name":null,"role":null,"team":null,"affiliation":null}
+
+Rules:
+- Use SELF_INTRODUCTION when the user introduces themselves, even if the name and role appear in an unusual order.
+- Use PERSONAL_CONTEXT when the user explicitly provides personal details but is not primarily introducing themselves.
+- Use NONE for questions, requests, or statements that do not explicitly provide personal information.
+- Extract only information explicitly stated by the user. Never infer or guess a name, role, team, or affiliation.
+- A role may be a multi-word title such as "Java developer". Preserve the user's wording, with normal capitalization.
+- A team, department, company, or organizational affiliation belongs in team or affiliation only when explicitly stated.
+- Return null for every field that is not explicitly provided.
+"""
+
 
 def _normalize_scope_text(value: str) -> str:
     """Normalize text for safe deterministic scope checks."""
     return re.sub(r"[^a-z0-9\s]", " ", (value or "").lower())
+
+
+def _contains_scope_term(text: str, terms: tuple[str, ...]) -> bool:
+    """Match scope terms as words instead of accidental substrings."""
+    return any(
+        re.search(rf"\b{re.escape(term)}\b", text)
+        for term in terms
+    )
+
+
+def is_personal_context_candidate(message: str) -> bool:
+    """Identify messages worth sending to the LLM personal-context classifier."""
+    text = message or ""
+    return bool(
+        PERSONAL_CONTEXT_CANDIDATE_PATTERN.search(text)
+        or re.search(
+            r"\b(?:from|work(?:s|ing)?\s+as|team|department|role|title)\b",
+            text,
+            re.IGNORECASE,
+        )
+    )
+
+
+def contains_question(message: str) -> bool:
+    """Keep combined introductions and questions on the normal answer path."""
+    return bool(
+        "?" in (message or "")
+        or re.search(
+            r"\b(?:what|who|where|when|why|how|can|could|would|does|do)\b",
+            message or "",
+            re.IGNORECASE,
+        )
+    )
+
+
+def is_internal_query(message: str) -> bool:
+    """Block requests for private implementation details before context lookup."""
+    return bool(INTERNAL_QUERY_PATTERN.search(message or ""))
+
+
+async def analyze_personal_context(message: str) -> dict | None:
+    """Classify and extract explicitly stated personal details when indicated."""
+    if not is_personal_context_candidate(message):
+        return None
+
+    try:
+        completion = await client.chat.completions.create(
+            model=settings.llm_model,
+            messages=[
+                {"role": "system", "content": PERSONAL_CONTEXT_ANALYSIS_PROMPT},
+                {"role": "user", "content": message},
+            ],
+            max_tokens=180,
+            temperature=0,
+            response_format={"type": "json_object"},
+        )
+        content = completion.choices[0].message.content or "{}"
+        extracted = json.loads(content)
+    except Exception:
+        logger.warning("Personal-context analysis failed", exc_info=True)
+        return None
+
+    intent = extracted.get("intent")
+    if intent not in {"SELF_INTRODUCTION", "PERSONAL_CONTEXT"}:
+        return None
+
+    return {
+        "intent": intent,
+        "name": extracted.get("name") or None,
+        "role": extracted.get("role") or None,
+        "team": extracted.get("team") or None,
+        "affiliation": extracted.get("affiliation") or None,
+    }
 
 
 def _history_text(history: list | None) -> str:
@@ -119,6 +271,22 @@ def get_closing_response(message: str) -> str | None:
 
     if any(re.search(pattern, normalized) for pattern in CLOSING_MESSAGE_PATTERNS):
         return CLOSING_MESSAGE_RESPONSE
+
+    return None
+
+
+def get_acknowledgement_response(message: str) -> str | None:
+    """Return a brief response for standalone conversational confirmations."""
+    normalized = _normalize_scope_text(message)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if not normalized:
+        return None
+
+    if normalized in ACKNOWLEDGEMENT_PHRASES or any(
+        re.search(pattern, normalized)
+        for pattern in ACKNOWLEDGEMENT_QUESTION_PATTERNS
+    ):
+        return "Glad to hear that! How can I help you today?"
 
     return None
 
@@ -156,19 +324,29 @@ def is_netkathir_related(
     message: str,
     history: list | None = None,
     context_message: str = "",
+    personal_context: dict | None = None,
 ) -> bool:
     """Return True when the request falls within the Netkathir scope."""
     if not message and not history and not context_message:
         return False
 
+    if is_internal_query(message):
+        return False
+
+    if personal_context and personal_context.get("intent") in {
+        "SELF_INTRODUCTION",
+        "PERSONAL_CONTEXT",
+    }:
+        return True
+
     message_text = _normalize_scope_text(message)
     context_text = _normalize_scope_text(context_message)
 
-    if any(term in message_text for term in NETKATHIR_EXPLICIT_TERMS):
+    if _contains_scope_term(message_text, NETKATHIR_EXPLICIT_TERMS):
         return True
-    if any(term in message_text for term in NETKATHIR_CONTEXT_TERMS):
+    if _contains_scope_term(message_text, NETKATHIR_CONTEXT_TERMS):
         return True
-    if any(greeting in message_text for greeting in GREETINGS):
+    if _contains_scope_term(message_text, GREETINGS):
         return True
 
     if history:
@@ -177,10 +355,10 @@ def is_netkathir_related(
         history_text = ""
 
     if re.search(r"\b(?:this|that|it|they|them|those|these|earlier|before|previous|mentioned|you mentioned|you said|that one|this one|itself|what about|what was|who was|where was|tell me more about it|give me that|give me this|the above|the previous one|the first one|his|her|their|the email|the link|the website|the address|the phone|the phone number|the contact|what was it|what was his|what was her|what was their)\b", message_text) and (
-        any(term in history_text for term in NETKATHIR_EXPLICIT_TERMS)
-        or any(term in history_text for term in NETKATHIR_CONTEXT_TERMS)
-        or any(term in context_text for term in NETKATHIR_EXPLICIT_TERMS)
-        or any(term in context_text for term in NETKATHIR_CONTEXT_TERMS)
+        _contains_scope_term(history_text, NETKATHIR_EXPLICIT_TERMS)
+        or _contains_scope_term(history_text, NETKATHIR_CONTEXT_TERMS)
+        or _contains_scope_term(context_text, NETKATHIR_EXPLICIT_TERMS)
+        or _contains_scope_term(context_text, NETKATHIR_CONTEXT_TERMS)
     ):
         return True
 
@@ -209,6 +387,7 @@ async def generate_response(
     message: str,
     history: list,
     context_message: str = "",
+    personal_context: dict | None = None,
 ):
     """
     Generate a response from the LLM.
@@ -262,7 +441,12 @@ async def generate_response(
             {"role": "assistant", "content": closing_response}
         ]
 
-    if not is_netkathir_related(message, history=history, context_message=context_message):
+    if not is_netkathir_related(
+        message,
+        history=history,
+        context_message=context_message,
+        personal_context=personal_context,
+    ):
         return get_scope_restriction_response(), [
             {"role": "user", "content": message},
             {"role": "assistant", "content": get_scope_restriction_response()},

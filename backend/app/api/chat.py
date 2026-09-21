@@ -1,7 +1,7 @@
 from uuid import uuid4
 import json
-import re
 import logging
+import re
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -11,12 +11,16 @@ from app.database import database
 from app.agent.prompts import NETKATHIR_SCOPE_RESTRICTION_RESPONSE
 from app.providers.llm import (
     AVAILABLE_TOOLS,
+    MAX_OUTPUT_TOKENS,
     TOOL_SCHEMAS,
     clean_response,
     client,
     generate_response,
     get_closing_response,
+    get_acknowledgement_response,
     get_relevant_history,
+    analyze_personal_context,
+    contains_question,
     is_netkathir_related,
 )
 
@@ -35,6 +39,87 @@ class ChatResponse(BaseModel):
     session_id: str
 
 
+PERSONAL_RECALL_PATTERNS = {
+    "name": re.compile(
+        r"\b(?:what\s+is\s+my\s+name|what\s+did\s+i\s+tell\s+you\s+my\s+name\s+was|"
+        r"do\s+you\s+remember\s+my\s+name)\b",
+        re.IGNORECASE,
+    ),
+    "role": re.compile(
+        r"\b(?:what\s+is\s+my\s+role|what\s+role\s+did\s+i\s+say\s+i\s+have)\b",
+        re.IGNORECASE,
+    ),
+    "team": re.compile(
+        r"\b(?:which\s+team\s+(?:do\s+i\s+work\s+in|am\s+i\s+from)|"
+        r"what\s+(?:team|department)\s+(?:do\s+i\s+work\s+in|am\s+i\s+from))\b",
+        re.IGNORECASE,
+    ),
+    "all": re.compile(
+        r"\bwhat\s+did\s+i\s+tell\s+you\s+about\s+myself\b",
+        re.IGNORECASE,
+    ),
+}
+
+
+def get_personal_context_reply(message: str, context: dict) -> str | None:
+    """Answer only explicit personal-context recall questions from saved fields."""
+    customer = context.get("customer", {}) if context else {}
+
+    def role_phrase(role: str) -> str:
+        normalized_role = role.strip()
+        if re.match(r"^(?:a|an|the)\s+", normalized_role, re.IGNORECASE):
+            return normalized_role
+        article = "an" if normalized_role[:1].lower() in "aeiou" else "a"
+        return f"{article} {normalized_role}"
+
+    if PERSONAL_RECALL_PATTERNS["name"].search(message):
+        name = customer.get("name")
+        return f"Your name is {name}." if name else "I don't think you've told me your name yet."
+
+    if PERSONAL_RECALL_PATTERNS["role"].search(message):
+        role = customer.get("role")
+        return (
+            f"You told me you're {role_phrase(role)}."
+            if role
+            else "I don't think you've told me your role yet."
+        )
+
+    if PERSONAL_RECALL_PATTERNS["team"].search(message):
+        team = customer.get("team")
+        return (
+            f"You told me you work in {team}."
+            if team
+            else "I don't think you've told me your team yet."
+        )
+
+    if PERSONAL_RECALL_PATTERNS["all"].search(message):
+        details = []
+        if customer.get("name"):
+            details.append(f"your name is {customer['name']}")
+        if customer.get("role"):
+            details.append(f"you are {role_phrase(customer['role'])}")
+        if customer.get("team"):
+            details.append(f"you work in {customer['team']}")
+        if customer.get("affiliation"):
+            details.append(f"you are affiliated with {customer['affiliation']}")
+        if details:
+            return "You told me that " + ", and ".join(details) + "."
+        return "I don't think you've told me anything about yourself yet."
+
+    return None
+
+
+async def save_direct_reply(session_id: str, message: str, reply: str) -> None:
+    """Persist deterministic intent replies like any other conversation turn."""
+    await database.add_messages(
+        session_id,
+        [
+            {"role": "user", "content": message},
+            {"role": "assistant", "content": reply},
+        ],
+    )
+
+
 def build_context_message(context: dict) -> str:
     """Converts stored context into information supplied to the LLM."""
 
@@ -50,6 +135,15 @@ def build_context_message(context: dict) -> str:
         context_parts.append(
             f"Customer name: {customer['name']}"
         )
+
+    if customer.get("role"):
+        context_parts.append(f"Customer role: {customer['role']}")
+
+    if customer.get("team"):
+        context_parts.append(f"Customer team or department: {customer['team']}")
+
+    if customer.get("affiliation"):
+        context_parts.append(f"Customer affiliation: {customer['affiliation']}")
 
     if conversation.get("language"):
         context_parts.append(
@@ -85,7 +179,7 @@ def build_context_message(context: dict) -> str:
     )
 
 
-def update_context(context: dict, message: str) -> dict:
+def update_context(context: dict, message: str, personal_context: dict | None = None) -> dict:
     """Extract important information from the user message."""
 
     if not context:
@@ -93,6 +187,9 @@ def update_context(context: dict, message: str) -> dict:
         context = {
             "customer": {
                 "name": None,
+                "role": None,
+                "team": None,
+                "affiliation": None,
             },
             "business": {
                 "appointment": None,
@@ -105,28 +202,14 @@ def update_context(context: dict, message: str) -> dict:
             },
         }
 
-    name_patterns = [
-        r"\bmy name is ([A-Za-z]+)",
-        r"\bi am ([A-Za-z]+)",
-        r"\bi'm ([A-Za-z]+)",
-        r"\bcall me ([A-Za-z]+)",
-    ]
+    if personal_context:
+        customer = context["customer"]
+        for field in ("name", "role", "team", "affiliation"):
+            value = personal_context.get(field)
+            if isinstance(value, str) and value.strip():
+                customer[field] = value.strip()
 
-    for pattern in name_patterns:
-
-        match = re.search(
-            pattern,
-            message,
-            re.IGNORECASE,
-        )
-
-        if match:
-
-            context["customer"]["name"] = (
-                match.group(1).strip().title()
-            )
-
-            break
+        context["conversation"]["personal_intent"] = personal_context["intent"]
 
     if len(message.strip()) > 3:
         message_lower = message.lower()
@@ -176,14 +259,23 @@ async def chat(req: ChatRequest):
     # Load saved context
     context = await database.get_context(session_id)
 
+    personal_context = await analyze_personal_context(req.message)
+
     # Update context with current message
     context = update_context(
         context,
         req.message,
+        personal_context,
     )
 
     # Convert context into LLM-readable format
     context_message = build_context_message(context)
+
+    personal_recall_reply = get_personal_context_reply(req.message, context)
+    if personal_recall_reply:
+        await save_direct_reply(session_id, req.message, personal_recall_reply)
+        await database.save_context(session_id, context)
+        return ChatResponse(reply=personal_recall_reply, session_id=session_id)
 
     closing_response = get_closing_response(req.message)
     if closing_response:
@@ -195,10 +287,39 @@ async def chat(req: ChatRequest):
         await database.save_context(session_id, context)
         return ChatResponse(reply=closing_response, session_id=session_id)
 
+    acknowledgement_response = get_acknowledgement_response(req.message)
+    if acknowledgement_response:
+        await save_direct_reply(session_id, req.message, acknowledgement_response)
+        await database.save_context(session_id, context)
+        return ChatResponse(
+            reply=acknowledgement_response,
+            session_id=session_id,
+        )
+
+    if (
+        personal_context
+        and personal_context["intent"] == "SELF_INTRODUCTION"
+        and not contains_question(req.message)
+    ):
+        name = personal_context.get("name")
+        reply = (
+            f"Hello {name}! How can I assist you today?"
+            if name
+            else "Nice to meet you! How can I assist you today?"
+        )
+        current_turn = [
+            {"role": "user", "content": req.message},
+            {"role": "assistant", "content": reply},
+        ]
+        await database.add_messages(session_id, current_turn)
+        await database.save_context(session_id, context)
+        return ChatResponse(reply=reply, session_id=session_id)
+
     if not is_netkathir_related(
         req.message,
         history=history,
         context_message=context_message,
+        personal_context=personal_context,
     ):
         reply = NETKATHIR_SCOPE_RESTRICTION_RESPONSE
         current_turn = [
@@ -210,7 +331,7 @@ async def chat(req: ChatRequest):
         return ChatResponse(reply=reply, session_id=session_id)
 
     relevant_history = get_relevant_history(req.message, history)
-    if not relevant_history:
+    if not relevant_history and not (personal_context and contains_question(req.message)):
         context_message = ""
 
     try:
@@ -220,6 +341,7 @@ async def chat(req: ChatRequest):
             message=req.message,
             history=relevant_history,
             context_message=context_message,
+            personal_context=personal_context,
         )
 
     except Exception as exc:
@@ -359,8 +481,17 @@ async def _stream_chat_generator(message: str, session_id: str):
     await database.ensure_conversation(session_id)
     history = await database.get_messages(session_id)
     context = await database.get_context(session_id)
-    context = update_context(context, message)
+    personal_context = await analyze_personal_context(message)
+    context = update_context(context, message, personal_context)
     context_message = build_context_message(context)
+
+    personal_recall_reply = get_personal_context_reply(message, context)
+    if personal_recall_reply:
+        await save_direct_reply(session_id, message, personal_recall_reply)
+        await database.save_context(session_id, context)
+        yield f"data: {json.dumps({'type': 'chunk', 'text': personal_recall_reply})}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
+        return
 
     closing_response = get_closing_response(message)
     if closing_response:
@@ -374,10 +505,40 @@ async def _stream_chat_generator(message: str, session_id: str):
         yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
         return
 
+    acknowledgement_response = get_acknowledgement_response(message)
+    if acknowledgement_response:
+        await save_direct_reply(session_id, message, acknowledgement_response)
+        await database.save_context(session_id, context)
+        yield f"data: {json.dumps({'type': 'chunk', 'text': acknowledgement_response})}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
+        return
+
+    if (
+        personal_context
+        and personal_context["intent"] == "SELF_INTRODUCTION"
+        and not contains_question(message)
+    ):
+        name = personal_context.get("name")
+        reply_text = (
+            f"Hello {name}! How can I assist you today?"
+            if name
+            else "Nice to meet you! How can I assist you today?"
+        )
+        current_turn = [
+            {"role": "user", "content": message},
+            {"role": "assistant", "content": reply_text},
+        ]
+        await database.add_messages(session_id, current_turn)
+        await database.save_context(session_id, context)
+        yield f"data: {json.dumps({'type': 'chunk', 'text': reply_text})}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
+        return
+
     if not is_netkathir_related(
         message,
         history=history,
         context_message=context_message,
+        personal_context=personal_context,
     ):
         reply_text = NETKATHIR_SCOPE_RESTRICTION_RESPONSE
         current_turn = [
@@ -391,7 +552,7 @@ async def _stream_chat_generator(message: str, session_id: str):
         return
 
     relevant_history = get_relevant_history(message, history)
-    if not relevant_history:
+    if not relevant_history and not (personal_context and contains_question(message)):
         context_message = ""
 
     messages = await _build_messages(message, relevant_history, context_message)
