@@ -100,9 +100,19 @@ input:focus-visible, textarea:focus-visible {
 .msg-slide-left { animation: msgSlideLeft 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; }
 .msg-slide-right { animation: msgSlideRight 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; }
 @keyframes messageSlideIn { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes slideUpEnter { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes messageSlideIn { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
 .message-slide-in { animation: messageSlideIn 0.6s cubic-bezier(0.22, 1, 0.36, 1) both; }
-.slide-up-enter { animation: slideUpEnter 0.6s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* QA-007: composer entrance animation.
+ * Fade-only (no translateY): the composer sits at the bottom edge of a
+ * fixed-height flex column, so any vertical translation temporarily pushed
+ * it below the viewport on short viewports. Opacity keeps the entrance
+ * effect while the element never leaves its layout position. */
+@keyframes composerEnter { from { opacity: 0; } to { opacity: 1; } }
+.slide-up-enter { animation: composerEnter 0.45s ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .slide-up-enter { animation: none; }
+}
 
 /* Fade in animation */
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -170,61 +180,30 @@ p, span, div { cursor: default; }
 a, button, [role="button"] { cursor: pointer; }
 
 /* ================================================================
-   CHATGPT-STYLE SIDEBAR LAYOUT
+   TWO-COLUMN SIDEBAR LAYOUT
+
+   The sidebar is inline in the flex flow at EVERY window width —
+   it occupies real layout space and never overlays, blocks, blurs
+   or disables the main chat. No drawer/modal/backdrop exists.
    ================================================================ */
 
-/* Sidebar: fixed overlay on mobile, inline on desktop */
 .chat-sidebar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  height: 100%;
-  z-index: 50;
+  position: relative;
+  flex-shrink: 0;
   width: 260px;
-  transform: translateX(-100%);
-  transition: transform 0.3s ease, width 0.3s ease;
+  height: 100%;
+  transform: none;
+  transition: width 0.3s ease;
 }
 
-.chat-sidebar.open {
-  transform: translateX(0);
+/* Collapsed state: the sidebar gives back its flex space and the
+   fixed compact icon rail (52px) becomes the visible navigation. */
+.chat-sidebar:not(.open) {
+  width: 0;
+  overflow: hidden;
 }
 
-.chat-sidebar.mobile-open {
-  transform: translateX(0);
-}
-
-/* On desktop, sidebar is inline in the flex flow */
-@media (min-width: 1024px) {
-  .chat-sidebar {
-    position: relative;
-    flex-shrink: 0;
-    width: 260px;
-    transform: none;
-  }
-  .chat-sidebar:not(.open) {
-    /* Fully collapsed on desktop: the fixed compact icon rail (52px) is the
-       visible element, so the inline aside must occupy no flex space. */
-    width: 0;
-    overflow: hidden;
-    transform: none;
-    margin: 0;
-    padding: 0;
-    border: none;
-  }
-}
-
-@media (max-width: 1023px) {
-  .chat-sidebar {
-    width: 260px;
-  }
-  /* On mobile the drawer is controlled ONLY by .mobile-open.
-     The persisted desktop .open flag must never open it. */
-  .chat-sidebar:not(.mobile-open) {
-    transform: translateX(-100%);
-  }
-}
-
-/* Main content: fills remaining space */
+/* Main content: fills the remaining width beside the sidebar */
 .chat-main {
   flex: 1;
   min-width: 0;
@@ -236,20 +215,9 @@ a, button, [role="button"] { cursor: pointer; }
   position: relative;
 }
 
-/* On desktop, when sidebar is closed, we leave space for the 52px rail */
-@media (min-width: 1024px) {
-  .chat-sidebar:not(.open) ~ .chat-main {
-    margin-left: 52px;
-  }
-}
-
-/* On mobile, always leave room for the compact icon rail (52px) 
-   using margin-left to prevent the rail from overlapping the content. */
-@media (max-width: 1023px) {
-  .chat-main {
-    margin-left: 52px;
-    width: calc(100% - 52px);
-  }
+/* When the inline sidebar is collapsed, leave room for the 52px rail */
+.chat-sidebar:not(.open) ~ .chat-main {
+  margin-left: 52px;
 }
 
 /* Ensure message content never breaks the layout */

@@ -125,19 +125,17 @@ export function ThreadNav() {
   const handleThreadSelect = useCallback((threadId: string) => {
     setActiveThread(threadId);
     setHoveredPopover(null);
-    if (window.innerWidth < 1024) toggleSidebar();
-  }, [setActiveThread, toggleSidebar]);
+    // Two-column layout: selecting a thread never hides the sidebar —
+    // both areas remain visible and usable side by side.
+  }, [setActiveThread]);
 
   const handleNewChat = useCallback(() => {
     // Creates exactly ONE empty thread (store-side idempotent: reuses an
     // existing empty "New Chat" instead of duplicating) and selects it.
     startNewChat();
     setHoveredPopover(null);
-    // Close the mobile drawer after creating. Desktop expand/collapse state is
-    // intentionally untouched — thread operations must not change sidebar UI state.
-    if (window.innerWidth < 1024) {
-      useChatStore.getState().setSidebarOpen(false);
-    }
+    // Two-column layout: New Chat never hides the sidebar — both areas stay
+    // usable side by side at every window width.
   }, [startNewChat]);
 
   const toggleMenu = useCallback((e: MouseEvent, threadId: string) => {
@@ -290,10 +288,10 @@ export function ThreadNav() {
 
   return (
     <>
-      {/* Non-modal sidebar: no full-screen backdrop on small screens — the
-          drawer (fixed 260px, z-50) simply overlays the chat while the main
-          area stays sharp, clickable and scrollable. Close affordances:
-          drawer header button, thread selection, New Chat, Escape. */}
+      {/* Two-column sidebar: inline in the flex flow at every window width —
+          it occupies real layout space, never overlays or blocks the chat,
+          and no backdrop/blur/overlay is rendered over the main area.
+          Close affordance: the header close button / Escape. */}
 
       {/* ═══ COMPACT ICON RAIL — visible on every screen width ═══
           - <1024px: always visible (unmounted only while the drawer is

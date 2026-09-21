@@ -3,6 +3,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { ChatStore, Thread, Message } from '../types';
+import { fetchChatHistory } from '../lib/api';
 
 const generateId = () => Math.random().toString(36).substring(2, 15);
 
@@ -111,6 +112,12 @@ export const useChatStore = create<ChatStore>()(
       ensureConsistency: () => {
         const state = get();
 
+        // Two-column sidebar: both flags are written together — normalize any
+        // state persisted by the old drawer behavior so they never disagree.
+        if (state.isMobileSidebarOpen !== state.isSidebarOpen) {
+          set({ isMobileSidebarOpen: state.isSidebarOpen });
+        }
+
         if (state.threads.length === 0) {
           const fallback = makeEmptyThread();
           set({ threads: [fallback], activeThreadId: fallback.id });
@@ -168,6 +175,79 @@ export const useChatStore = create<ChatStore>()(
         }));
       },
 
+      // QA-009: complete a streaming placeholder — set final content and
+      // clear the streaming flag in one atomic update.
+      finalizeMessage: (threadId: string, messageId: string, content: string) => {
+        set((state) => ({
+          threads: state.threads.map((t) =>
+            t.id === threadId
+              ? {
+                  ...t,
+                  messages: t.messages.map((m) =>
+                    m.id === messageId ? { ...m, content, streaming: false } : m
+                  ),
+                  updatedAt: Date.now(),
+                }
+              : t
+          ),
+        }));
+      },
+
+      // QA-009: after a reload, replace any assistant placeholder that was
+      // left mid-stream with the server's completed turn (or drop it when
+      // the server never stored a reply for it).
+      reconcileInterruptedStreams: async () => {
+        const threadsWithPlaceholder = get().threads.filter((t) => {
+          const lastMessage = t.messages[t.messages.length - 1];
+          return lastMessage?.role === 'bot' && lastMessage.streaming;
+        });
+
+        for (const thread of threadsWithPlaceholder) {
+          const placeholder = thread.messages[thread.messages.length - 1];
+
+          if (!thread.sessionId) {
+            // No backend session — the placeholder can never be completed.
+            get().removeMessage(thread.id, placeholder.id);
+            continue;
+          }
+
+          try {
+            const history = await fetchChatHistory(thread.sessionId);
+            const userMessage = thread.messages[thread.messages.length - 2];
+            let serverReply: string | null = null;
+
+            if (userMessage && userMessage.role === 'user') {
+              const serverUserIndex = history.findIndex(
+                (m) => m.role === 'user' && m.content === userMessage.content
+              );
+              const nextServer = serverUserIndex >= 0 ? history[serverUserIndex + 1] : undefined;
+              if (nextServer?.role === 'bot' && nextServer.content.trim()) {
+                serverReply = nextServer.content;
+              }
+            } else {
+              const lastServerBot = [...history].reverse().find((m) => m.role === 'bot');
+              if (lastServerBot?.content.trim()) serverReply = lastServerBot.content;
+            }
+
+            // Re-read state: the placeholder must still exist and still be
+            // streaming (guards against a concurrent live stream/double-run).
+            const stillPending = get().threads.some((t) =>
+              t.id === thread.id &&
+              t.messages.some((m) => m.id === placeholder.id && m.streaming)
+            );
+            if (!stillPending) continue;
+
+            if (serverReply) {
+              get().finalizeMessage(thread.id, placeholder.id, serverReply);
+            } else {
+              get().removeMessage(thread.id, placeholder.id);
+            }
+          } catch {
+            // Backend unreachable — keep the placeholder; do not destroy data.
+          }
+        }
+      },
+
       setThreadSessionId: (threadId: string, sessionId: string) => {
         set((state) => ({
           threads: state.threads.map((t) =>
@@ -188,12 +268,7 @@ export const useChatStore = create<ChatStore>()(
         }));
       },
       setSidebarOpen: (open: boolean) => {
-        if (typeof window !== 'undefined' && window.innerWidth >= 1024) {
-          set({ isSidebarOpen: open, isMobileSidebarOpen: false });
-          return;
-        }
-
-        set({ isMobileSidebarOpen: open, isSidebarOpen: open });
+        set({ isSidebarOpen: open, isMobileSidebarOpen: open });
       },
       setEditingThread: (threadId: string | null) => set({ editingThreadId: threadId }),
       toggleDarkMode: () => set((state) => ({ isDarkMode: !state.isDarkMode })),
