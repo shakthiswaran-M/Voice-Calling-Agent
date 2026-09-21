@@ -22,6 +22,9 @@ function App() {
   // once synchronously on mount — thread operations below keep it valid.
   useEffect(() => {
     useChatStore.getState().ensureConsistency();
+    // QA-009: reconcile any assistant placeholder left incomplete by a
+    // refresh during streaming, using the server's authoritative history.
+    void useChatStore.getState().reconcileInterruptedStreams();
   }, []);
 
   // Desktop collapse state and mobile drawer state are intentionally independent.
@@ -52,11 +55,11 @@ function App() {
       e.preventDefault();
       toggleSidebar();
     }
-    // Escape → close the drawer on mobile
+    // Escape → close the sidebar (two-column layout, all widths)
     if (e.key === 'Escape') {
       const store = useChatStore.getState();
-      if (store.isMobileSidebarOpen) {
-        store.toggleSidebar();
+      if (store.isSidebarOpen || store.isMobileSidebarOpen) {
+        useChatStore.getState().setSidebarOpen(false);
       }
     }
   }, [toggleSidebar]);

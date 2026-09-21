@@ -97,6 +97,30 @@ export async function sendChatMessage(
   return (await res.json()) as ChatResponse;
 }
 
+// ── Conversation history (QA-009) ──
+
+export interface HistoryMessage {
+  id: string;
+  role: 'user' | 'bot';
+  content: string;
+  timestamp: number;
+}
+
+/**
+ * Fetch the authoritative server-side history for one session. Used after a
+ * reload to replace a locally truncated streaming placeholder with the
+ * completed server turn. Server errors surface as ApiError.
+ */
+export async function fetchChatHistory(sessionId: string): Promise<HistoryMessage[]> {
+  const res = await request(
+    `${API_BASE_URL}/api/chat/history/${encodeURIComponent(sessionId)}`,
+    { method: 'GET' },
+    NETWORK_ERROR_MESSAGES.chat
+  );
+  const data = (await res.json()) as { messages?: HistoryMessage[] };
+  return data.messages ?? [];
+}
+
 /** Send recorded audio to the backend and get back the transcribed text. */
 export async function transcribeAudio(audioBlob: Blob, signal?: AbortSignal): Promise<string> {
   const formData = new FormData();
@@ -142,6 +166,7 @@ export async function sendChatMessageStream(
   onChunk: (text: string) => void,
   sessionId?: string | null,
   signal?: AbortSignal,
+  onSessionId?: (sessionId: string) => void,
 ): Promise<string> {
   const res = await fetch(`${API_BASE_URL}/api/chat/stream`, {
     method: 'POST',
@@ -181,6 +206,12 @@ export async function sendChatMessageStream(
       if (!jsonStr) continue;
       try {
         const event = JSON.parse(jsonStr) as StreamChunk;
+        // Session id arrives on the first event so the thread is linked to
+        // its backend session even if the user refreshes mid-stream.
+        if (event.session_id) {
+          finalSessionId = event.session_id;
+          onSessionId?.(event.session_id);
+        }
         if (event.type === 'chunk' && event.text) {
           onChunk(event.text);
         } else if (event.type === 'done') {

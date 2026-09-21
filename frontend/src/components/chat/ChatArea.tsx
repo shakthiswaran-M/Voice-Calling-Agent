@@ -295,7 +295,9 @@ export function ChatArea() {
     let botMessageId: string | null = null;
     let streamedReply = '';
     try {
-      const placeholderId = addMessage(threadId, { role: 'bot', content: '' });
+      // QA-009: mark the placeholder as streaming so a mid-stream refresh
+      // can be detected on reload and reconciled with the server's turn.
+      const placeholderId = addMessage(threadId, { role: 'bot', content: '', streaming: true });
       botMessageId = placeholderId;
       setPendingAssistantMessageId(placeholderId);
       const session_id = await sendChatMessageStream(
@@ -305,14 +307,24 @@ export function ChatArea() {
           useChatStore.getState().updateMessage(threadId, placeholderId, streamedReply);
         },
         resolvedThread?.sessionId,
+        undefined,
+        (newSessionId) => {
+          // Link the thread to its session as soon as the backend announces
+          // it (first stream event), so a mid-stream refresh can still find
+          // the authoritative server turn on reload.
+          if (!resolvedThread?.sessionId && newSessionId) {
+            setThreadSessionId(threadId, newSessionId);
+          }
+        },
       );
-      if (!streamedReply) useChatStore.getState().updateMessage(threadId, botMessageId, '(no response)');
-      if (!resolvedThread?.sessionId && session_id) setThreadSessionId(threadId, session_id);
+      // QA-009: finalize (clears the streaming flag) instead of updateMessage.
+      useChatStore.getState().finalizeMessage(threadId, botMessageId, streamedReply || '(no response)');
     } catch (err) {
       const message = err instanceof ApiError ? err.message : FALLBACK_ERROR_RESPONSE;
       if (botMessageId) {
         if (streamedReply.trim()) {
-          useChatStore.getState().updateMessage(threadId, botMessageId, `${streamedReply}\n\n${message}`);
+          // QA-009: finalize so the placeholder no longer counts as streaming.
+          useChatStore.getState().finalizeMessage(threadId, botMessageId, `${streamedReply}\n\n${message}`);
         } else {
           removeMessage(threadId, botMessageId);
           addMessage(threadId, { role: 'bot', content: message });

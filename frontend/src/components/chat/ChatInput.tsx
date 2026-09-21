@@ -154,6 +154,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
             placeholder={isRecording ? 'Listening...' : 'Ask me anything...'}
+            aria-label="Message"
             disabled={disabled}
             rows={1}
             className={cn(
@@ -272,6 +273,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(({
             placeholder={
               isRecording ? 'Listening...' : 'Type your message...'
             }
+            aria-label="Message"
             disabled={disabled}
             rows={1}
             className={cn(

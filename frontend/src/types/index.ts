@@ -8,6 +8,10 @@ export type Message = {
   pinned?: boolean;
   /** When this message was pinned (used to show the most recently pinned one). */
   pinnedAt?: number;
+  /** QA-009: true while this bot message is receiving stream chunks.
+   *  Cleared on completion/error so load-time reconciliation can detect
+   *  placeholders left behind by a mid-stream refresh. */
+  streaming?: boolean;
 };
 
 export type Thread = {
@@ -52,7 +56,9 @@ export type ChatActions = {
   ensureConsistency: () => void;
   addMessage: (threadId: string, message: Omit<Message, 'id' | 'timestamp'>) => string;
   updateMessage: (threadId: string, messageId: string, content: string) => void;
+  finalizeMessage: (threadId: string, messageId: string, content: string) => void;
   removeMessage: (threadId: string, messageId: string) => void;
+  reconcileInterruptedStreams: () => Promise<void>;
   setThreadSessionId: (threadId: string, sessionId: string) => void;
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
