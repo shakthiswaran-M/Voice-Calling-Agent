@@ -1,3 +1,5 @@
+import { TTS_CONFIG } from './ttsConfig';
+
 export function cancelBrowserTts(): void {
   if ('speechSynthesis' in window) {
     window.speechSynthesis.cancel();
@@ -12,6 +14,9 @@ export function speakWithBrowserTts(text: string, onEnd: () => void): boolean {
 
   try {
     const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = TTS_CONFIG.browser.rate;
+    utterance.pitch = TTS_CONFIG.browser.pitch;
+    utterance.volume = TTS_CONFIG.browser.volume;
     utterance.onstart = () => console.info('[TTS] Browser speech started');
     utterance.onend = onEnd;
     utterance.onerror = (event) => {

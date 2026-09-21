@@ -15,6 +15,7 @@ from app.providers.llm import (
     clean_response,
     client,
     generate_response,
+    get_closing_response,
     get_relevant_history,
     is_netkathir_related,
 )
@@ -184,6 +185,16 @@ async def chat(req: ChatRequest):
     # Convert context into LLM-readable format
     context_message = build_context_message(context)
 
+    closing_response = get_closing_response(req.message)
+    if closing_response:
+        current_turn = [
+            {"role": "user", "content": req.message},
+            {"role": "assistant", "content": closing_response},
+        ]
+        await database.add_messages(session_id, current_turn)
+        await database.save_context(session_id, context)
+        return ChatResponse(reply=closing_response, session_id=session_id)
+
     if not is_netkathir_related(
         req.message,
         history=history,
@@ -350,6 +361,18 @@ async def _stream_chat_generator(message: str, session_id: str):
     context = await database.get_context(session_id)
     context = update_context(context, message)
     context_message = build_context_message(context)
+
+    closing_response = get_closing_response(message)
+    if closing_response:
+        current_turn = [
+            {"role": "user", "content": message},
+            {"role": "assistant", "content": closing_response},
+        ]
+        await database.add_messages(session_id, current_turn)
+        await database.save_context(session_id, context)
+        yield f"data: {json.dumps({'type': 'chunk', 'text': closing_response})}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
+        return
 
     if not is_netkathir_related(
         message,

@@ -1,3 +1,5 @@
+import { TTS_CONFIG } from './ttsConfig';
+
 export interface SpeechSynthesisOptions {
   language?: string;
   rate?: number;
@@ -101,9 +103,9 @@ class SpeechSynthesisService {
       } else {
         utterance.lang = language;
       }
-      utterance.rate = options.rate ?? 0.96;
-      utterance.pitch = options.pitch ?? 1.02;
-      utterance.volume = options.volume ?? 1;
+      utterance.rate = options.rate ?? TTS_CONFIG.browser.rate;
+      utterance.pitch = options.pitch ?? TTS_CONFIG.browser.pitch;
+      utterance.volume = options.volume ?? TTS_CONFIG.browser.volume;
       utterance.onstart = options.onstart ?? null;
       utterance.onend = options.onend ?? null;
       utterance.onerror = options.onerror ?? null;

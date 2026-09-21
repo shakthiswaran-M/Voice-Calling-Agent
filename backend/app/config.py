@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     elevenlabs_api_key: str
     elevenlabs_voice_id: str 
     elevenlabs_model_id: str
+    elevenlabs_speed: float = 0.90
+    elevenlabs_stability: float = 0.58
+    elevenlabs_similarity_boost: float = 0.78
+    elevenlabs_style: float = 0.08
+    elevenlabs_use_speaker_boost: bool = True
 
     # Database configuration
     database_url: str

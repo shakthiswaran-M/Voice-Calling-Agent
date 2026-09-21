@@ -9,6 +9,7 @@ from openai import AsyncOpenAI
 
 from app.agent.prompts import (
     AGENT_INSTRUCTIONS,
+    CLOSING_MESSAGE_RESPONSE,
     NETKATHIR_SCOPE_RESTRICTION_RESPONSE,
     SYSTEM_PROMPT,
 )
@@ -73,6 +74,21 @@ GREETINGS = (
     "greetings",
 )
 
+CLOSING_MESSAGE_PATTERNS = (
+    r"\b(?:thank you|thanks|thx)\b",
+    r"\b(?:i appreciate|appreciate)\b",
+    r"\b(?:you(?:re| re| are) helpful|you helped me)\b",
+    r"\b(?:that is|that's|that was) all\b",
+    r"\b(?:no more questions?|nothing else)\b",
+    r"\b(?:goodbye|good bye|bye|see you|talk to you later)\b",
+    r"\b(?:have a (?:good|great)|good) (?:day|evening|night)\b",
+)
+
+CLOSING_QUESTION_PATTERN = (
+    r"\b(?:what|who|where|when|why|how|which|can|could|would|will|"
+    r"do|does|did|is|are|tell|explain|provide|give|show)\b"
+)
+
 
 def _normalize_scope_text(value: str) -> str:
     """Normalize text for safe deterministic scope checks."""
@@ -93,6 +109,18 @@ def _history_text(history: list | None) -> str:
         if content:
             parts.append(content)
     return " ".join(parts)
+
+
+def get_closing_response(message: str) -> str | None:
+    """Return a deterministic reply for standalone closing messages."""
+    normalized = _normalize_scope_text(message)
+    if not normalized or re.search(CLOSING_QUESTION_PATTERN, normalized):
+        return None
+
+    if any(re.search(pattern, normalized) for pattern in CLOSING_MESSAGE_PATTERNS):
+        return CLOSING_MESSAGE_RESPONSE
+
+    return None
 
 
 def get_relevant_history(message: str, history: list | None = None, max_messages: int = 4) -> list:
@@ -227,6 +255,12 @@ async def generate_response(
     initial_message_count = len(messages)
 
     reply = ""
+
+    closing_response = get_closing_response(message)
+    if closing_response:
+        return closing_response, current_turn + [
+            {"role": "assistant", "content": closing_response}
+        ]
 
     if not is_netkathir_related(message, history=history, context_message=context_message):
         return get_scope_restriction_response(), [
